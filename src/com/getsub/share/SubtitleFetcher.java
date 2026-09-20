@@ -224,43 +224,56 @@ public class SubtitleFetcher {
         return url + (url.contains("?") ? "&" : "?") + "fmt=" + fmt;
     }
 
-    /** Detect payload type (json3 vs timedtext XML vs VTT) and parse. */
+    /** Detect payload type (json3 vs timedtext XML vs VTT) and parse.
+     *
+     * v2.5.3: every parser is strictly gated on payload markers —
+     *   json3 : body starts with '{'
+     *   XML   : body starts with '&lt;?xml' or contains '&lt;transcript'
+     *   VTT   : body starts with 'WEBVTT' or contains a real cue timing
+     *           ('00:00:01.234 --&gt;'); a bare '--&gt;' no longer counts because
+     *           HTML comments contain it.
+     * Previously the ungated "last resort" pass ran parseVtt on ANY content,
+     * so a 200-with-junk caption response (HTML error page, broken JSON,
+     * arbitrary text) was accepted as captions and saved as a garbage .txt
+     * marked Done. Junk now yields an empty list → downloadCaptionLines moves
+     * to the next format candidate → the honest "YouTube returned no caption
+     * data" error surfaces if none pan out. */
     static List<String> parseAuto(String content) {
         String trimmed = content.trim();
         if (trimmed.length() == 0) {
             return new ArrayList<String>();
         }
-        try {
-            if (trimmed.startsWith("{")) {
+        if (trimmed.startsWith("{")) {
+            try {
                 List<String> lines = parseJson3(trimmed);
                 if (!lines.isEmpty()) return lines;
-            } else if (trimmed.startsWith("<")) {
+            } catch (Exception ignored) {
+            }
+        }
+        if (trimmed.startsWith("<?xml") || trimmed.contains("<transcript")) {
+            try {
                 List<String> lines = parseTimedtextXml(trimmed);
                 if (!lines.isEmpty()) return lines;
-            } else if (trimmed.startsWith("WEBVTT") || trimmed.contains("-->")) {
+            } catch (Exception ignored) {
+            }
+        }
+        if (looksLikeVtt(trimmed)) {
+            try {
                 List<String> lines = parseVtt(trimmed);
                 if (!lines.isEmpty()) return lines;
+            } catch (Exception ignored) {
             }
-        } catch (Exception ignored) {
-            // fall through to trying every parser below
-        }
-        // Last resort: try each parser regardless of sniffing.
-        try {
-            List<String> lines = parseJson3(content);
-            if (!lines.isEmpty()) return lines;
-        } catch (Exception ignored) {
-        }
-        try {
-            List<String> lines = parseTimedtextXml(content);
-            if (!lines.isEmpty()) return lines;
-        } catch (Exception ignored) {
-        }
-        try {
-            List<String> lines = parseVtt(content);
-            if (!lines.isEmpty()) return lines;
-        } catch (Exception ignored) {
         }
         return new ArrayList<String>();
+    }
+
+    /** VTT gate (v2.5.3): WEBVTT header, or at least one real cue-timing line. */
+    static boolean looksLikeVtt(String content) {
+        if (content.startsWith("WEBVTT")) {
+            return true;
+        }
+        return Pattern.compile("\\d{1,2}:\\d{2}:\\d{2}[.,]\\d{3}\\s*-->")
+                .matcher(content).find();
     }
 
     // ---- networking ----
@@ -450,16 +463,19 @@ public class SubtitleFetcher {
     }
 
     /**
-     * Parse YouTube timedtext XML (srv1/srv3 — what auto-generated tracks
-     * actually return even when asked for json3). Example:
-     * {@code <p t="0" d="5920"><s ac="0">hello</s><s> world</s></p>}
+     * Parse YouTube timedtext XML — both srv3 ({@code <p t="0" d="5920">} with
+     * inner {@code <s>} word tags) and srv1 ({@code <text start="0" dur="2.5">})
+     * shapes; auto-generated tracks may return either even when json3 was
+     * requested. v2.5.3: tag names match on a word boundary with a
+     * backreference, so look-alikes (e.g. {@code <pre>}) can never pair up,
+     * and srv1 no longer depends on the (now gated) VTT fallback.
      */
     static List<String> parseTimedtextXml(String xml) {
         List<String> lines = new ArrayList<String>();
-        Matcher p = Pattern.compile("<p[^>]*>(.*?)</p>", Pattern.DOTALL).matcher(xml);
+        Matcher p = Pattern.compile("<(p|text)(?:\\s[^>]*)?>(.*?)</\\1>", Pattern.DOTALL).matcher(xml);
         while (p.find()) {
-            String inner = p.group(1);
-            // Strip inner tags (<s>, <w>, etc.) but keep their text.
+            String inner = p.group(2);
+            // Strip inner tags (<s>, <w>, <b>, etc.) but keep their text.
             inner = inner.replaceAll("<[^>]+>", "");
             inner = unescapeHtml(inner).replace("\n", " ").replaceAll("\\s+", " ").trim();
             if (!inner.isEmpty() && (lines.isEmpty() || !lines.get(lines.size() - 1).equals(inner))) {

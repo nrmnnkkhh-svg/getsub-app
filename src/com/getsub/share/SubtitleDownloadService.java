@@ -15,6 +15,7 @@ import android.provider.MediaStore;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class SubtitleDownloadService extends Service {
 
@@ -24,17 +25,42 @@ public class SubtitleDownloadService extends Service {
 
     private static final String CHANNEL_ID = "getsub_downloads";
     private static final int ONGOING_NOTIF_ID = 1001;
-    private static final int RESULT_NOTIF_ID = 1002;
+    // v2.5.3: result notifications get a PER-JOB id (base + jobId) so two
+    // downloads finishing close together don't overwrite each other's result.
+    private static final int RESULT_NOTIF_BASE = 2000;
+
+    // v2.5.3: concurrent-job bookkeeping. Foreground state must survive until
+    // the LAST active job finishes; tearing it down on the first completion
+    // stripped process protection from still-running downloads (kill risk →
+    // job stuck at "Queued" forever).
+    private final AtomicInteger activeJobs = new AtomicInteger(0);
+    private int latestStartId = 0;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // v2.5.3: defensive guard — a null intent would NPE here. With
+        // START_NOT_STICKY no real redelivery is expected, so just stop.
+        if (intent == null) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
         final int jobId = intent.getIntExtra(EXTRA_JOB_ID, -1);
         final String sharedText = intent.getStringExtra(EXTRA_URL);
         String langExtra = intent.getStringExtra(EXTRA_LANG);
         final String lang = (langExtra == null || langExtra.trim().isEmpty()) ? "en" : langExtra;
 
         ensureChannel();
-        startForeground(ONGOING_NOTIF_ID, buildNotification("Fetching subtitles...", true),
+
+        int active;
+        synchronized (this) {
+            latestStartId = startId;
+            active = activeJobs.incrementAndGet();
+        }
+        startForeground(ONGOING_NOTIF_ID,
+                buildNotification(active > 1
+                        ? "Fetching subtitles... (" + active + " in parallel)"
+                        : "Fetching subtitles...", true),
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
 
         new Thread(new Runnable() {
@@ -51,32 +77,44 @@ public class SubtitleDownloadService extends Service {
         String resultText;
         boolean success;
         try {
-            SubtitleFetcher.Result result = SubtitleFetcher.fetch(sharedText, lang);
-            saveToDownloads(result.filename, result.text);
-            JobStore.updateJob(this, jobId, JobStore.STATUS_DONE, "Saved: " + result.filename);
-            resultText = "Saved: " + result.filename;
-            success = true;
-        } catch (Exception e) {
-            String msg = e.getMessage() == null ? e.toString() : e.getMessage();
-            JobStore.updateJob(this, jobId, JobStore.STATUS_ERROR, msg);
-            resultText = msg;
-            success = false;
+            try {
+                SubtitleFetcher.Result result = SubtitleFetcher.fetch(sharedText, lang);
+                saveToDownloads(result.filename, result.text);
+                JobStore.updateJob(this, jobId, JobStore.STATUS_DONE, "Saved: " + result.filename);
+                resultText = "Saved: " + result.filename;
+                success = true;
+            } catch (Exception e) {
+                String msg = e.getMessage() == null ? e.toString() : e.getMessage();
+                JobStore.updateJob(this, jobId, JobStore.STATUS_ERROR, msg);
+                resultText = msg;
+                success = false;
+            }
+
+            // Post the result under a per-job id, separate from the ongoing
+            // foreground id (v2.2.1: reusing the just-removed foreground id can
+            // leave a stale state visible on some devices; v2.5.3: one shared
+            // result id also made concurrent results overwrite each other).
+            NotificationManager nm = getSystemService(NotificationManager.class);
+            if (nm != null) {
+                Notification finalNotif = buildNotification(
+                        (success ? "Done: " : "Error: ") + resultText, false);
+                nm.notify(RESULT_NOTIF_BASE + Math.max(jobId, 0), finalNotif);
+            }
+        } finally {
+            // v2.5.3: only the LAST finished job tears down foreground state.
+            // stopSelf(latestStartId) is race-safe: if a new job started in the
+            // meantime, its larger startId makes the system ignore this stop.
+            boolean last;
+            int stopId;
+            synchronized (this) {
+                last = activeJobs.decrementAndGet() <= 0;
+                stopId = latestStartId;
+            }
+            if (last) {
+                stopForeground(Service.STOP_FOREGROUND_REMOVE);
+                stopSelf(stopId);
+            }
         }
-
-        // Kill the ongoing notification explicitly, then post the result
-        // under a FRESH id. Reusing the just-removed foreground id can
-        // leave the stale "downloading" state visible (or swallow the
-        // result) on some devices — separate ids make the switch atomic.
-        stopForeground(Service.STOP_FOREGROUND_REMOVE);
-
-        NotificationManager nm = getSystemService(NotificationManager.class);
-        Notification finalNotif = buildNotification((success ? "Done: " : "Error: ") + resultText, false);
-        if (nm != null) {
-            nm.cancel(ONGOING_NOTIF_ID);
-            nm.notify(RESULT_NOTIF_ID, finalNotif);
-        }
-
-        stopSelf();
     }
 
     private void saveToDownloads(String filename, String content) throws IOException {
