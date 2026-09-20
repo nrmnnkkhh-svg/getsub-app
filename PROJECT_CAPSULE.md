@@ -1525,6 +1525,13 @@ Same keystore, so it installs as a clean upgrade. One difference from before: th
 
 - The README's AI maintenance rule now has 4 steps: update capsule → copy capsule to `Download/` → regenerate `Download/getsub-app-full-source.md` → report. `README.md` updated accordingly; no code changes in this step.
 
+## 21. v2.3 redesign — dark-theme MainActivity (Sep 18, 2026)
+
+- **What:** `MainActivity.java` replaced wholesale with a dark-theme redesign (supplied via `Download/MainActivity.java`, 461 lines). Palette: navy page `#0F0F14`, surface `#1A1A24`, cards `#21212F`, accent purple `#6C63FF` — all named constants at the top of the class. Branded header (accent dot + name + tagline) containing the progress bar (thin 3dp accent-tinted, above the input) and the URL field + Get button. Job rows are rounded cards with a 4dp status stripe (amber/green/red), pill status badge, middle-truncated URL, colour-coded result line. New centered empty state (arrow glyph + heading + body). Refresh button removed (1s poller covers it).
+- **Kept intact:** notification-permission prompt, 1s poller, `JobStore`/`SubtitleDownloadService` flow (`en`), empty-view wiring.
+- **Two micro-tweaks applied on top of the delivered file:** restored the "fetching subtitles..." toast on Get (parity with v2.1), and gave the empty view weight so it truly centers in remaining space. Previous version backed up at `/tmp/MainActivity.v2_2_1.bak` (not in repo, so `build.sh` ignores it).
+- **Verified:** clean `build.sh` rebuild, `apksigner verify` OK, fresh `getsub-app.apk` saved to `Download/`. All APIs used are minSdk-29-safe.
+
 ## 22. v2.4 feature — custom launcher icon (Sep 18, 2026)
 
 - **What:** new `res/drawable/ic_launcher.png` (192×192): brand-purple gradient (`#7C74FF → #4842C4`, matches the v2.3 UI accent) with a white download arrow over transcript lines. Full-bleed square so launchers can apply their own mask. Manifest `android:icon` switched from `@android:drawable/stat_sys_download` to `@drawable/ic_launcher`; no new permissions/deps. `README.md` layout table updated.
@@ -1555,9 +1562,9 @@ Same keystore, so it installs as a clean upgrade. One difference from before: th
 - **What:** swipe-to-delete removed entirely per user request — rows no longer move; only the CLEAR button remains (wording reverted to CLEAR / "Clear history?" / "Clear"). Also removed now-unused `JobStore.deleteJob`, the swipe hint, and the `MotionEvent` plumbing. Verified zero remaining references (`grep` clean).
 - **Verified:** clean `build.sh` rebuild, `apksigner verify` OK, fresh `getsub-app.apk` saved to `Download/`.
 
-## 21. v2.3 redesign — dark-theme MainActivity (Sep 18, 2026)
+## 27. Cancelled experiment — GetSub Personal side-by-side variant (Sep 20, 2026)
 
-- **What:** `MainActivity.java` replaced wholesale with a dark-theme redesign (supplied via `Download/MainActivity.java`, 461 lines). Palette: navy page `#0F0F14`, surface `#1A1A24`, cards `#21212F`, accent purple `#6C63FF` — all named constants at the top of the class. Branded header (accent dot + name + tagline) containing the progress bar (thin 3dp accent-tinted, above the input) and the URL field + Get button. Job rows are rounded cards with a 4dp status stripe (amber/green/red), pill status badge, middle-truncated URL, colour-coded result line. New centered empty state (arrow glyph + heading + body). Refresh button removed (1s poller covers it).
-- **Kept intact:** notification-permission prompt, 1s poller, `JobStore`/`SubtitleDownloadService` flow (`en`), empty-view wiring.
-- **Two micro-tweaks applied on top of the delivered file:** restored the "fetching subtitles..." toast on Get (parity with v2.1), and gave the empty view weight so it truly centers in remaining space. Previous version backed up at `/tmp/MainActivity.v2_2_1.bak` (not in repo, so `build.sh` ignores it).
-- **Verified:** clean `build.sh` rebuild, `apksigner verify` OK, fresh `getsub-app.apk` saved to `Download/`. All APIs used are minSdk-29-safe.
+- **What happened:** a full project copy (`/root/getsub-personal`, package `com.getsub.personal`, launcher name "GetSub Personal") was created so future builds would install as a separate app. The user then cancelled it before it was ever built or installed.
+- **Reversal (verified):** `/root/getsub-personal` deleted; `Download/getsub-personal.apk` and `Download/getsub-personal-full-source.md` removed (neither was ever built — no separate app ever reached the phone). Original project untouched throughout (`com.getsub.share`, all 5 sources intact).
+- No rebuild needed (no code changes in this step); `getsub-app-full-source.md` regenerated fresh.
+
