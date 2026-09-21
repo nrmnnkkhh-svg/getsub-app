@@ -317,7 +317,7 @@ def step_paste_flow():
     time.sleep(7)  # let the heads-up retract + list poller settle -> static screen
     record('paste flow: result notification posted', notif_pkg_present())
     # Diagnostics for whichever way the notification checks go:
-    shell('dumpsys notification_manager > /sdcard/notif_dump.txt 2>/dev/null', check=False)
+    shell('dumpsys notification > /sdcard/notif_dump.txt 2>/dev/null', check=False)
     adb('pull', '/sdcard/notif_dump.txt', os.path.join(ART, 'notif_dump.txt'), check=False)
     root = dump_ui()
     ui_st = job_statuses(root)
@@ -360,7 +360,12 @@ def step_clear():
     record('clear: confirmation dialog appears', True)
     screenshot('clear_dialog')
 
-    btns = nodes(dump_ui(), text='Clear', cls='android.widget.Button')
+    # AOSP dialog themes render button labels uppercased in the
+    # accessibility tree ("CLEAR", not "Clear") — match case-insensitively
+    # and keep the class filter so the section-header CLEAR TextView
+    # (not a Button) can't collide.
+    btns = [n for n in nodes(dump_ui(), cls='android.widget.Button')
+            if (n.get('text') or '').strip().upper() == 'CLEAR']
     if not btns:
         raise RuntimeError('dialog Clear button not found')
     tap_node(btns[0])
