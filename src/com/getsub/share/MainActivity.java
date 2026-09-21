@@ -48,6 +48,8 @@ public class MainActivity extends Activity {
     private ListView    listView;
     private ProgressBar topProgress;
     private JobAdapter  adapter;
+    /** Signature of the job set currently rendered (v2.5.4, see loadJobs). */
+    private String      renderedSig = null;
 
     private final Handler  handler = new Handler(Looper.getMainLooper());
     private final Runnable poller  = new Runnable() {
@@ -299,15 +301,28 @@ public class MainActivity extends Activity {
         JSONArray arr = JobStore.getAllNewestFirst(this);
         List<JSONObject> jobs = new ArrayList<JSONObject>();
         boolean anyFetching = false;
+        StringBuilder sig = new StringBuilder();
         for (int i = 0; i < arr.length(); i++) {
             JSONObject j = arr.optJSONObject(i);
             if (j == null) continue;
             jobs.add(j);
-            if (JobStore.STATUS_QUEUED.equals(j.optString("status", "")))
+            String status = j.optString("status", "");
+            if (JobStore.STATUS_QUEUED.equals(status))
                 anyFetching = true;
+            sig.append(j.optInt("id", -1)).append(':').append(status)
+               .append(':').append(j.optString("result", "")).append(';');
         }
         topProgress.setVisibility(anyFetching ? View.VISIBLE : View.GONE);
-        adapter.updateJobs(jobs);
+        // v2.5.4: only rebuild rows when the data actually changed. The 1s
+        // poller used to notifyDataSetChanged every tick, recreating every
+        // row view even when nothing changed — wasted battery, and kept the
+        // window from ever reaching accessibility idle (which uiautomator
+        // dumps, and therefore the CI visual checks, depend on).
+        String s = sig.toString();
+        if (!s.equals(renderedSig)) {
+            renderedSig = s;
+            adapter.updateJobs(jobs);
+        }
     }
 
     /** Ask first: clearing history never deletes saved .txt files. */
