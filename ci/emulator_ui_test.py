@@ -76,9 +76,17 @@ def shell(cmd, check=False):
 
 
 def dump_ui(retries=6):
-    """Capture the current view hierarchy via uiautomator dump."""
+    """Capture the current view hierarchy via uiautomator dump.
+
+    STRICT by design (v2.5.3-ci2): the on-device dump file is deleted first,
+    so a failed/hung dump can never be masked by a stale previous capture
+    (run #1's bug: waits kept re-reading the empty-home hierarchy while the
+    real screen showed the job row). Hung dumps are retried; UiAutomation
+    needs a settle moment between attempts after a timeout.
+    """
     last = ''
-    for _ in range(retries):
+    for attempt in range(retries):
+        shell('rm -f /sdcard/getsub_ui.xml')
         shell('uiautomator dump /sdcard/getsub_ui.xml')
         xml = adb('exec-out', 'cat', '/sdcard/getsub_ui.xml', check=False)
         last = xml[:200]
@@ -87,8 +95,22 @@ def dump_ui(retries=6):
                 return ET.fromstring(xml)
             except ET.ParseError:
                 pass
-        time.sleep(2)
+        # A dump that times out (screen never went idle) leaves its
+        # UiAutomation connection registered, which can hang the NEXT dump
+        # too (seen in CI run #1). Kill leftovers before retrying.
+        shell('pkill -f com.android.commands.uiautomator', check=False)
+        time.sleep(3)
     raise RuntimeError('could not capture UI dump (last: %r)' % last)
+
+
+def notif_state():
+    """All notification texts currently posted (cheap, UI-idle-independent).
+
+    Used as the oracle for service-lifecycle waits: uiautomator dump cannot
+    capture screens with continuous animation (indeterminate progress,
+    blinking cursor, heads-up notifications) -- it waits for an idle state
+    that never comes and then hangs (see capsule §30)."""
+    return shell('dumpsys notification_manager')
 
 
 BOUNDS = re.compile(r'\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]')
@@ -211,13 +233,18 @@ def step_paste_flow():
         raise RuntimeError('Get button not found after typing')
     tap_node(gets[0])
 
-    wait_until('job row appears', lambda: len(job_statuses(dump_ui())) >= 1, timeout=20)
-    st = job_statuses(dump_ui())
-    record('paste flow: job row appears (statuses=%s)' % st, len(st) >= 1)
-    screenshot('job_after_get')
+    # Service lifecycle oracle = notifications (immune to UI animation).
+    # NEVER dump while the fetch is running: spinner/toast/heads-up keep the
+    # screen from ever reaching uiautomator's idle state.
+    wait_until('ongoing "Fetching subtitles" notification',
+               lambda: 'Fetching subtitles' in notif_state(), timeout=25)
+    record('paste flow: foreground service running (ongoing notification)', True)
+    screenshot('job_queued')
 
-    wait_until('job terminal',
-               lambda: 'QUEUED' not in job_statuses(dump_ui()), timeout=JOB_TIMEOUT)
+    wait_until('result notification (Done/Error)',
+               lambda: ('Done:' in notif_state()) or ('Error:' in notif_state()),
+               timeout=JOB_TIMEOUT)
+    time.sleep(7)  # let the heads-up retract + list poller settle -> static screen
     st = job_statuses(dump_ui())
     record('paste flow: job reached terminal status %s' % st, st and st[0] in ('DONE', 'ERROR'))
 
@@ -233,15 +260,16 @@ def step_share_flow():
     shell("am start -a android.intent.action.SEND -t 'text/plain' "
           "--eu android.intent.extra.TEXT '%s' -n %s" % (URL2, SHARE), check=True)
     wait_until('focus back on MainActivity', focused_on_pkg, timeout=20)
-    wait_until('second job row', lambda: len(job_statuses(dump_ui())) >= 2, timeout=20)
-    record('share intent: ShareActivity logged a second job', True)
-    screenshot('share_queued')
-
-    wait_until('both jobs terminal',
-               lambda: (lambda s: len(s) >= 2 and 'QUEUED' not in s)(job_statuses(dump_ui())),
-               timeout=JOB_TIMEOUT)
-    st = job_statuses(dump_ui())
-    record('share intent: both jobs terminal %s' % st, len(st) >= 2 and 'QUEUED' not in st)
+    # Second job => second result notification (per-job ids since v2.5.3).
+    def two_results():
+        n = notif_state()
+        return (n.count('Done:') + n.count('Error:')) >= 2
+    wait_until('second result notification', two_results, timeout=JOB_TIMEOUT)
+    time.sleep(7)  # heads-up retract + settle -> static screen for the dump
+    root = dump_ui()
+    st = job_statuses(root)
+    record('share intent: second job logged and terminal %s' % st,
+           len(st) >= 2 and 'QUEUED' not in st)
     screenshot('share_terminal')
 
 
