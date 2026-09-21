@@ -3,7 +3,14 @@
 set -e
 
 PROJECT="$(cd "$(dirname "$0")" && pwd)"
-ANDROID_JAR="$HOME/android-sdk/android.jar"
+# Env overrides let CI (GitHub Actions) reuse this exact script:
+#   GETSUB_ANDROID_JAR     path to android.jar (default: Termux setup location)
+#   GETSUB_KEYSTORE        signing keystore    (default: ~/.debug.keystore)
+#   GETSUB_KEYSTORE_ALIAS  key alias           (default: debug)
+#   GETSUB_KEYSTORE_PASS   store+key password  (default: android)
+# The d8 fallback in Step 4 keeps non-Termux toolchains working; on Termux
+# (where dx exists) behavior is exactly what it always was.
+ANDROID_JAR="${GETSUB_ANDROID_JAR:-$HOME/android-sdk/android.jar}"
 
 BUILD="$PROJECT/build"
 GEN="$BUILD/gen"
@@ -41,7 +48,16 @@ javac \
   "$PROJECT"/src/com/getsub/share/*.java
 
 echo "=== Step 4: Convert to DEX ==="
-dx --dex --output="$BUILD/classes.dex" "$OBJ"
+if command -v dx >/dev/null 2>&1; then
+  dx --dex --output="$BUILD/classes.dex" "$OBJ"
+else
+  # d8 fallback (CI/desktop toolchains): dx is a Termux package, d8 ships
+  # with the official Android build-tools. Same DEX output, different
+  # launcher. On Termux the dx branch above always wins (dx is installed),
+  # so the known d8+OpenJDK21 Termux snag stays avoided.
+  ( cd "$OBJ" && jar cf "$BUILD/classes.jar" . )
+  d8 --lib "$ANDROID_JAR" --min-api 29 --output "$BUILD" "$BUILD/classes.jar"
+fi
 
 echo "=== Step 5: Package APK ==="
 cp "$APK_DIR/app-unaligned.apk" "$APK_DIR/app.apk"
@@ -49,17 +65,20 @@ cd "$BUILD" && zip -j "$APK_DIR/app.apk" classes.dex
 cd "$PROJECT"
 
 echo "=== Step 6: Sign ==="
-if [ ! -f "$HOME/.debug.keystore" ]; then
-  echo "ERROR: debug keystore not found at $HOME/.debug.keystore"
-  echo "Run the one-time setup step first."
+KS="${GETSUB_KEYSTORE:-$HOME/.debug.keystore}"
+KS_ALIAS="${GETSUB_KEYSTORE_ALIAS:-debug}"
+KS_PASS="${GETSUB_KEYSTORE_PASS:-android}"
+if [ ! -f "$KS" ]; then
+  echo "ERROR: keystore not found at $KS"
+  echo "Run the one-time setup step first (or set GETSUB_KEYSTORE)."
   exit 1
 fi
 
 apksigner sign \
-  --ks "$HOME/.debug.keystore" \
-  --ks-key-alias debug \
-  --ks-pass pass:android \
-  --key-pass pass:android \
+  --ks "$KS" \
+  --ks-key-alias "$KS_ALIAS" \
+  --ks-pass "pass:$KS_PASS" \
+  --key-pass "pass:$KS_PASS" \
   "$APK_DIR/app.apk"
 
 echo ""
