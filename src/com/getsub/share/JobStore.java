@@ -26,12 +26,18 @@ public class JobStore {
     public static final String STATUS_ERROR = "Error";
 
     public static synchronized int addJob(Context ctx, String url) {
+        return addJob(ctx, url, "");
+    }
+
+    /** v2.6: jobs remember which language was requested. */
+    public static synchronized int addJob(Context ctx, String url, String lang) {
         JSONArray jobs = readAll(ctx);
         int id = nextId(jobs);
         JSONObject job = new JSONObject();
         try {
             job.put("id", id);
             job.put("url", url);
+            job.put("lang", lang == null ? "" : lang);
             job.put("status", STATUS_QUEUED);
             job.put("result", "");
             job.put("time", timestamp());

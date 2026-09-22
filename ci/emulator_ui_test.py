@@ -145,7 +145,7 @@ def jobs_state():
     try:
         out = shell('cat /data/data/%s/files/jobs.json 2>/dev/null || echo []' % PKG)
         arr = json.loads(out.strip() or '[]')
-        return [(j.get('id'), j.get('status'), j.get('result', ''))
+        return [(j.get('id'), j.get('status'), j.get('result', ''), j.get('lang', ''))
                 for j in reversed(arr)]
     except Exception:
         return None
@@ -222,6 +222,20 @@ def wait_until(desc, pred, timeout=30, interval=2):
     raise RuntimeError('timeout (%ds) waiting for: %s' % (timeout, desc))
 
 
+def edit_fields(root):
+    """(link field, language field) — told apart by width (v2.6)."""
+    eds = nodes(root, cls='android.widget.EditText')
+    if len(eds) < 2:
+        raise RuntimeError('expected link + lang fields, got %d' % len(eds))
+
+    def width(n):
+        m = BOUNDS.search(n.get('bounds', ''))
+        x1, _, x2, _ = (int(v) for v in m.groups())
+        return x2 - x1
+    eds.sort(key=width, reverse=True)
+    return eds[0], eds[1]
+
+
 def job_statuses(root):
     """Status badge texts of visible job rows, newest first."""
     return [n.get('text') for n in nodes(root, cls='android.widget.TextView')
@@ -266,23 +280,23 @@ def step_home_ui():
     checks = [
         ('header "GetSub"', nodes(root, text='GetSub')),
         ('tagline', nodes(root, text_contains='subtitle downloader')),
-        ('link input field', nodes(root, cls='android.widget.EditText')),
+        ('link + language input fields (v2.6)',
+         len(nodes(root, cls='android.widget.EditText')) == 2),
         ('Get button', nodes(root, text='Get')),
         ('RECENT DOWNLOADS label', nodes(root, text='RECENT DOWNLOADS')),
         ('CLEAR button', nodes(root, text='CLEAR')),
         ('empty state ("No downloads yet")', nodes(root, text='No downloads yet')),
     ]
     for name, hits in checks:
-        record('home UI: ' + name, len(hits) >= 1)
+        ok = hits if isinstance(hits, bool) else len(hits) >= 1
+        record('home UI: ' + name, ok)
     screenshot('home_empty')
 
 
 def step_paste_flow():
     root = dump_ui()
-    edits = nodes(root, cls='android.widget.EditText')
-    if not edits:
-        raise RuntimeError('link input field not found')
-    tap_node(edits[0])
+    url_f, _lang_f = edit_fields(root)
+    tap_node(url_f)
     time.sleep(1.5)
     shell("input text '%s'" % URL1, check=True)
     time.sleep(1)
@@ -337,6 +351,16 @@ def step_share_flow():
     # would correctly see null (run #4 bug).
     shell("am start -a android.intent.action.SEND -t 'text/plain' "
           "--es android.intent.extra.TEXT '%s' -n %s" % (URL2, SHARE), check=True)
+    # v2.6: the share target now shows a language picker dialog first.
+    wait_until('language picker dialog',
+               lambda: nodes(dump_ui(), text='Get subtitles in:'), timeout=15)
+    screenshot('share_picker')
+    root = dump_ui()
+    en_items = [n for n in nodes(root, cls='android.widget.TextView')
+                if (n.get('text') or '').startswith('en ')]
+    if not en_items:
+        raise RuntimeError('no "en" item in language picker')
+    tap_node(en_items[0])
     wait_until('focus back on MainActivity', focused_on_pkg, timeout=20)
     wait_until('second job in JobStore', lambda: len(jobs_state() or []) >= 2, timeout=20)
     record('share intent: ShareActivity logged a second job', True)
@@ -347,6 +371,38 @@ def step_share_flow():
     ui_st = job_statuses(root)
     record('share intent: list shows both rows %s' % (ui_st or '?'), len(ui_st) >= 2)
     screenshot('share_terminal')
+
+
+def step_lang_flow():
+    """v2.6 end-to-end: explicit language reaches the fetcher. 'zz' is not a
+    real subtitle language, so the honest outcome is an Error naming the
+    available languages (or a bot-check Error from the datacenter IP — both
+    prove the plumbing; jobs.json proves WHICH language was requested)."""
+    root = dump_ui()
+    url_f, lang_f = edit_fields(root)
+    tap_node(lang_f)
+    time.sleep(1)
+    shell("input text 'zz'", check=True)
+    shell('input keyevent 4')
+    time.sleep(1)
+    root = dump_ui()
+    url_f, _l = edit_fields(root)
+    tap_node(url_f)
+    time.sleep(1)
+    shell("input text '%s'" % URL1, check=True)
+    shell('input keyevent 4')
+    time.sleep(1)
+    root = dump_ui()
+    tap_node(nodes(root, text='Get')[0])
+
+    wait_until('third job in JobStore', lambda: len(jobs_state() or []) >= 3, timeout=20)
+    st = wait_jobs_terminal(3)
+    top = st[0]
+    record('lang flow: job stored with lang=zz', top[3] == 'zz', 'lang=%r' % (top[3],))
+    answered = ("No 'zz'" in top[2]) or top[2].startswith('YouTube:') \
+        or top[2].startswith('Could not')
+    record('lang flow: fetcher answered for zz (%s)' % top[1], answered, top[2][:80])
+    screenshot('lang_flow')
 
 
 def step_clear():
@@ -472,7 +528,7 @@ def selftest():
 def main():
     os.makedirs(ART, exist_ok=True)
     steps = [step_boot_install, step_launch, step_home_ui, step_paste_flow,
-             step_share_flow, step_clear, step_relaunch]
+             step_share_flow, step_lang_flow, step_clear, step_relaunch]
     crashed = None
     for s in steps:
         log('--- %s ---' % s.__name__)

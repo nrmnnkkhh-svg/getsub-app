@@ -29,7 +29,7 @@ Requirements: `openjdk-21`, `aapt`, `aapt2`, `apksigner`, `dx`, `zip`, `unzip`, 
 | `build.sh` | Full on-device build + sign pipeline |
 | `res/values/strings.xml` | App name resources |
 | `res/drawable/ic_launcher.png` | Custom launcher icon (brand purple, generated) |
-| `src/com/getsub/share/` | `ShareActivity`, `MainActivity`, `JobStore`, `SubtitleFetcher`, `SubtitleDownloadService` |
+| `src/com/getsub/share/` | `ShareActivity` (v2.6 language picker dialog), `MainActivity`, `JobStore`, `Prefs` (saved language), `SubtitleFetcher`, `SubtitleDownloadService` |
 | `build/apk/app.apk` | Built, signed APK |
 | `PROJECT_CAPSULE.md` | Full project memory: history, source, design, troubleshooting |
 | `getsub-app-full-source.md` | Generated full-source snapshot (regenerated on every change per the rule below) |

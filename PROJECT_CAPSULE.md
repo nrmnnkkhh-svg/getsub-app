@@ -1613,3 +1613,11 @@ Same keystore, so it installs as a clean upgrade. One difference from before: th
 - **One-time migration:** the APK currently on the phone carries run #6's ephemeral signature, so the first secret-signed install still needs one uninstall (history list resets; saved .txt files stay). Every install after that is a seamless upgrade.
 - **Verified:** local build with stamping (`aapt2 dump badging` shows versionName/Code), parser suite + golden identical, driver selftest 14/14; CI verdict = the first run after this commit.
 
+## 33. v2.6 — language picker (Sep 22, 2026)
+
+- **What:** subtitles no longer hardcoded to `en`. In-app: a narrow language field next to the paste box (hint = saved default; typing a code uses it and saves it as the new default). Share flow: `ShareActivity` is now a dialog-themed activity showing "Get subtitles in:" with 16 common languages (default marked; a custom saved default outside the list is prepended) — one tap starts the job in that language. Jobs remember their language (`lang` field in `jobs.json`).
+- **Files:** new `Prefs.java` (SharedPreferences: last language, default `en`); `MainActivity` (lang field + Get-handler logic + "fetching <lang>" toast); `ShareActivity` rewritten as picker dialog (manifest theme `Theme.NoDisplay` → `Theme.DeviceDefault.Dialog.NoActionBar`); `JobStore.addJob(ctx, url, lang)` overload (old signature delegates with ""); `SubtitleFetcher`/service unchanged — they already spoke language codes, including the "No 'xx' found. Available: …" error.
+- **CI coverage (new/updated checks):** home UI asserts two input fields; share flow now drives the picker dialog (screenshot `share_picker`) and taps `en`; new `step_lang_flow` enters `zz` in the lang field and asserts via the jobs.json oracle that the job stored `lang=zz` and that the fetcher answered for it (`No 'zz' …` list, or the bot-check Error — both prove plumbing); CLEAR/relaunch steps unchanged (3 jobs by then).
+- **UX notes:** share flow costs one extra tap (picker) — the trade for per-video language choice; hands-free default remains available by tapping the marked default. Termux/CLI paths unchanged (`getsub <url> [lang]` always had this).
+- **Verified locally:** build green, parser suite + golden identical, driver selftest 14/14; CI verdict = run after this commit.
+

@@ -162,6 +162,19 @@ public class MainActivity extends Activity {
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         editLp.setMargins(0, 0, dp(10), 0);
 
+        // v2.6: narrow language field; empty means "use my saved default".
+        final EditText langInput = new EditText(this);
+        langInput.setHint(Prefs.getLang(this));
+        langInput.setHintTextColor(C_TEXT2);
+        langInput.setTextColor(C_TEXT1);
+        langInput.setTextSize(14);
+        langInput.setSingleLine(true);
+        langInput.setBackground(roundRect(C_INPUT, dp(12)));
+        langInput.setPadding(dp(10), dp(14), dp(10), dp(14));
+        LinearLayout.LayoutParams langLp = new LinearLayout.LayoutParams(
+                dp(52), LinearLayout.LayoutParams.WRAP_CONTENT);
+        langLp.setMargins(0, 0, dp(10), 0);
+
         Button fetchBtn = new Button(this);
         fetchBtn.setText("Get");
         fetchBtn.setTextColor(Color.WHITE);
@@ -179,20 +192,27 @@ public class MainActivity extends Activity {
                             "Paste a YouTube link first", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                int jobId = JobStore.addJob(MainActivity.this, text);
+                String lang = langInput.getText().toString().trim();
+                if (lang.isEmpty()) {
+                    lang = Prefs.getLang(MainActivity.this);
+                } else {
+                    Prefs.setLang(MainActivity.this, lang);
+                }
+                int jobId = JobStore.addJob(MainActivity.this, text, lang);
                 Intent si = new Intent(MainActivity.this, SubtitleDownloadService.class);
                 si.putExtra(SubtitleDownloadService.EXTRA_JOB_ID, jobId);
                 si.putExtra(SubtitleDownloadService.EXTRA_URL, text);
-                si.putExtra(SubtitleDownloadService.EXTRA_LANG, "en");
+                si.putExtra(SubtitleDownloadService.EXTRA_LANG, lang);
                 startForegroundService(si);
                 urlInput.setText("");
                 Toast.makeText(MainActivity.this,
-                        "GetSub: fetching subtitles...", Toast.LENGTH_SHORT).show();
+                        "GetSub: fetching " + lang + " subtitles...", Toast.LENGTH_SHORT).show();
                 loadJobs();
             }
         });
 
         inputRow.addView(urlInput, editLp);
+        inputRow.addView(langInput, langLp);
         inputRow.addView(fetchBtn);
         header.addView(inputRow, inputRowLp);
 
