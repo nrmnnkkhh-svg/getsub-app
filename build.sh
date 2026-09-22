@@ -32,10 +32,17 @@ echo "=== Step 1: Compile resources ==="
 aapt2 compile --dir "$PROJECT/res" -o "$COMPILED_RES/"
 
 echo "=== Step 2: Link resources + generate R.java ==="
+# Optional version stamping (CI sets these; Termux builds leave them empty):
+VNAME="${GETSUB_VERSION_NAME:-}"
+VCODE="${GETSUB_VERSION_CODE:-}"
+VFLAGS=()
+[ -n "$VNAME" ] && VFLAGS+=(--version-name "$VNAME")
+[ -n "$VCODE" ] && VFLAGS+=(--version-code "$VCODE")
 aapt2 link \
   -I "$ANDROID_JAR" \
   --manifest "$PROJECT/AndroidManifest.xml" \
   --java "$GEN" \
+  ${VFLAGS[@]+"${VFLAGS[@]}"} \
   -o "$APK_DIR/app-unaligned.apk" \
   "$COMPILED_RES"/*.flat
 

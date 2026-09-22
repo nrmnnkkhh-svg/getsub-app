@@ -1,6 +1,6 @@
 # GetSub App — Complete Source Bundle
 
-- Generated (UTC): 2026-09-21 13:20:04
+- Generated (UTC): 2026-09-22 12:45:53
 - Version: v2.5.3 + CI tooling (see `PROJECT_CAPSULE.md` §28–29)
 - Project root: `~/getsub-app` | Package: `com.getsub.share`
 - Rebuild: `cd ~/getsub-app && bash build.sh`
@@ -112,10 +112,17 @@ echo "=== Step 1: Compile resources ==="
 aapt2 compile --dir "$PROJECT/res" -o "$COMPILED_RES/"
 
 echo "=== Step 2: Link resources + generate R.java ==="
+# Optional version stamping (CI sets these; Termux builds leave them empty):
+VNAME="${GETSUB_VERSION_NAME:-}"
+VCODE="${GETSUB_VERSION_CODE:-}"
+VFLAGS=()
+[ -n "$VNAME" ] && VFLAGS+=(--version-name "$VNAME")
+[ -n "$VCODE" ] && VFLAGS+=(--version-code "$VCODE")
 aapt2 link \
   -I "$ANDROID_JAR" \
   --manifest "$PROJECT/AndroidManifest.xml" \
   --java "$GEN" \
+  ${VFLAGS[@]+"${VFLAGS[@]}"} \
   -o "$APK_DIR/app-unaligned.apk" \
   "$COMPILED_RES"/*.flat
 
@@ -455,7 +462,18 @@ public class MainActivity extends Activity {
         header.addView(titleRow);
 
         TextView tagline = new TextView(this);
-        tagline.setText("YouTube subtitle downloader");
+        // Stage 3: CI stamps a versionName (ci-<run number>); show it so the
+        // user always knows exactly which build is installed. Termux builds
+        // have no versionName -> tagline stays as before.
+        String tagText = "YouTube subtitle downloader";
+        try {
+            String vn = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            if (vn != null && !vn.isEmpty()) {
+                tagText = tagText + "  \u00b7  " + vn;
+            }
+        } catch (Exception ignored) {
+        }
+        tagline.setText(tagText);
         tagline.setTextColor(C_TEXT2);
         tagline.setTextSize(13);
         LinearLayout.LayoutParams taglineLp = new LinearLayout.LayoutParams(

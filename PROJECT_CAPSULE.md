@@ -1605,3 +1605,11 @@ Same keystore, so it installs as a clean upgrade. One difference from before: th
 - **Benefits:** less view churn and battery use, smoother scrolling, and settled screens that accessibility tooling (and CI visual checks) can capture.
 - **Verified:** local build green; parser suite untouched (no fetcher change); driver selftest 14/14; CI run #4 = on-device verdict.
 
+## 32. Stage 3 — CI signs with the phone keystore (GitHub Secret) + version stamping (Sep 21, 2026)
+
+- **Secret:** `GETSUB_KEYSTORE_B64` = base64 of the phone's `~/.debug.keystore`, set by the user directly from Termux via `gh secret set` (the value never passes through the AI/sandbox). The workflow decodes it when present and hands it to `build.sh` via the existing `GETSUB_KEYSTORE` override; without it, an ephemeral key is generated and the log says so loudly. Alias/passwords (`debug`/`android`) match the project's one-time setup, so `build.sh` defaults suffice.
+- **Version stamping:** `build.sh` Step 2 now accepts `GETSUB_VERSION_NAME` / `GETSUB_VERSION_CODE` → `aapt2 link --version-name/--version-code`. CI stamps `ci-<run_number>` (the run number links straight to the exact CI build); Termux builds stay unstamped. `MainActivity`'s tagline appends the versionName when present ("YouTube subtitle downloader · ci-47").
+- **Upgrade semantics:** versionCode = run number (monotonic). Consequence: installing an unstamped Termux build (code 0) over a stamped CI build is a version downgrade and Android will refuse it — CI is now the primary install channel by design.
+- **One-time migration:** the APK currently on the phone carries run #6's ephemeral signature, so the first secret-signed install still needs one uninstall (history list resets; saved .txt files stay). Every install after that is a seamless upgrade.
+- **Verified:** local build with stamping (`aapt2 dump badging` shows versionName/Code), parser suite + golden identical, driver selftest 14/14; CI verdict = the first run after this commit.
+

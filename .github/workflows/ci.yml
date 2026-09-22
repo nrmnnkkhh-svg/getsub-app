@@ -31,13 +31,26 @@ jobs:
           echo "$ANDROID_HOME/build-tools/33.0.2" >> "$GITHUB_PATH"
           echo "GETSUB_ANDROID_JAR=$ANDROID_HOME/platforms/android-33/android.jar" >> "$GITHUB_ENV"
 
-      - name: Build APK with the project's own build.sh (d8 branch, ephemeral CI key)
+      - name: Prepare signing key (repo secret if present, else ephemeral)
         env:
-          GETSUB_KEYSTORE: ${{ runner.temp }}/ci-debug.keystore
+          KS_B64: ${{ secrets.GETSUB_KEYSTORE_B64 }}
         run: |
-          keytool -genkeypair -keystore "$GETSUB_KEYSTORE" -alias debug \
-            -storepass android -keypass android -dname "CN=GetSub-CI" \
-            -keyalg RSA -keysize 2048 -validity 7 > /dev/null
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/sign.keystore"
+            echo "Signing with the repo-secret keystore: CI APKs upgrade-install seamlessly"
+          else
+            keytool -genkeypair -keystore "$RUNNER_TEMP/sign.keystore" -alias debug \
+              -storepass android -keypass android -dname "CN=GetSub-CI" \
+              -keyalg RSA -keysize 2048 -validity 7 > /dev/null
+            echo "No GETSUB_KEYSTORE_B64 secret set: using EPHEMERAL key (install requires uninstall first)"
+          fi
+          echo "GETSUB_KEYSTORE=$RUNNER_TEMP/sign.keystore" >> "$GITHUB_ENV"
+
+      - name: Build APK with the project's own build.sh (d8 branch, version-stamped)
+        env:
+          GETSUB_VERSION_NAME: ci-${{ github.run_number }}
+          GETSUB_VERSION_CODE: ${{ github.run_number }}
+        run: |
           bash build.sh
           cp build/apk/app.apk ci-artifacts/getsub-app-ci.apk
 

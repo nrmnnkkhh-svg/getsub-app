@@ -107,7 +107,18 @@ public class MainActivity extends Activity {
         header.addView(titleRow);
 
         TextView tagline = new TextView(this);
-        tagline.setText("YouTube subtitle downloader");
+        // Stage 3: CI stamps a versionName (ci-<run number>); show it so the
+        // user always knows exactly which build is installed. Termux builds
+        // have no versionName -> tagline stays as before.
+        String tagText = "YouTube subtitle downloader";
+        try {
+            String vn = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            if (vn != null && !vn.isEmpty()) {
+                tagText = tagText + "  \u00b7  " + vn;
+            }
+        } catch (Exception ignored) {
+        }
+        tagline.setText(tagText);
         tagline.setTextColor(C_TEXT2);
         tagline.setTextSize(13);
         LinearLayout.LayoutParams taglineLp = new LinearLayout.LayoutParams(
