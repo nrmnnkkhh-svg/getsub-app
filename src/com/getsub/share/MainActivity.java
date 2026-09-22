@@ -205,6 +205,11 @@ public class MainActivity extends Activity {
                 si.putExtra(SubtitleDownloadService.EXTRA_LANG, lang);
                 startForegroundService(si);
                 urlInput.setText("");
+                // v2.6.1: don't let the keyboard linger after Get (and don't
+                // let a still-focused field re-show the IME on next resume —
+                // run #9 showed it covering the job list).
+                urlInput.clearFocus();
+                langInput.clearFocus();
                 Toast.makeText(MainActivity.this,
                         "GetSub: fetching " + lang + " subtitles...", Toast.LENGTH_SHORT).show();
                 loadJobs();

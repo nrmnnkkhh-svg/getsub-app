@@ -1621,3 +1621,9 @@ Same keystore, so it installs as a clean upgrade. One difference from before: th
 - **UX notes:** share flow costs one extra tap (picker) — the trade for per-video language choice; hands-free default remains available by tapping the marked default. Termux/CLI paths unchanged (`getsub <url> [lang]` always had this).
 - **Verified locally:** build green, parser suite + golden identical, driver selftest 14/14; CI verdict = run after this commit.
 
+## 34. v2.6.1 — clear input focus after Get (run #9 post-mortem, Sep 22, 2026)
+
+- **Run #9:** 22/23. The single FAIL ("share intent: list shows both rows") was a visibility artifact, not a data bug: when MainActivity resumed after the share picker closed, the soft keyboard re-appeared (the link field still held focus from the paste flow) and covered the second list row, so uiautomator's dump — which only sees visible nodes — reported one row. The jobs.json oracle confirmed both jobs terminal; screenshot `06_share_terminal.png` shows the keyboard over the list. Same screenshots prove the good news: version stamp renders in the tagline ("· ci-9") and the share picker dialog works on-device (`05_share_picker.png`).
+- **Fix (app-side, real UX win):** the Get handler now calls `clearFocus()` on both input fields after starting a job — no lingering keyboard after Get on real phones either. CI additionally taps a neutral header node after the picker closes, before the share-terminal dump.
+- **Verified:** local build green, selftest 14/14; CI run #10 = verdict.
+

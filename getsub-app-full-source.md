@@ -1,6 +1,6 @@
 # GetSub App — Complete Source Bundle
 
-- Generated (UTC): 2026-09-22 13:21:19
+- Generated (UTC): 2026-09-22 13:28:03
 - Version: v2.5.3 + CI tooling (see `PROJECT_CAPSULE.md` §28–29)
 - Project root: `~/getsub-app` | Package: `com.getsub.share`
 - Rebuild: `cd ~/getsub-app && bash build.sh`
@@ -567,6 +567,11 @@ public class MainActivity extends Activity {
                 si.putExtra(SubtitleDownloadService.EXTRA_LANG, lang);
                 startForegroundService(si);
                 urlInput.setText("");
+                // v2.6.1: don't let the keyboard linger after Get (and don't
+                // let a still-focused field re-show the IME on next resume —
+                // run #9 showed it covering the job list).
+                urlInput.clearFocus();
+                langInput.clearFocus();
                 Toast.makeText(MainActivity.this,
                         "GetSub: fetching " + lang + " subtitles...", Toast.LENGTH_SHORT).show();
                 loadJobs();

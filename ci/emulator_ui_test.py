@@ -362,6 +362,13 @@ def step_share_flow():
         raise RuntimeError('no "en" item in language picker')
     tap_node(en_items[0])
     wait_until('focus back on MainActivity', focused_on_pkg, timeout=20)
+    # Dismiss any soft keyboard with a neutral header tap (a focused field
+    # can re-show the IME on resume and hide list rows from the dump).
+    root = dump_ui()
+    hdr = nodes(root, text='GetSub')
+    if hdr:
+        tap_node(hdr[0])
+        time.sleep(1)
     wait_until('second job in JobStore', lambda: len(jobs_state() or []) >= 2, timeout=20)
     record('share intent: ShareActivity logged a second job', True)
     st = wait_jobs_terminal(2)
