@@ -105,11 +105,16 @@ def dump_ui(retries=6):
 
 
 def notif_state():
-    """Raw notification_manager dump (records carry pkg + id, NOT the text).
+    """Raw NotificationManager dump (records carry pkg + id, NOT the text).
 
     Used to assert WHICH notifications exist: id 1001 = ongoing foreground
-    notification, ids 2000+ = per-job result notifications (v2.5.3)."""
-    return shell('dumpsys notification_manager')
+    notification, ids 2000+ = per-job result notifications (v2.5.3).
+    NOTE: the service is registered as 'notification' — 'notification_manager'
+    is not a ServiceManager name and dumps nothing (run #4 forensics)."""
+    out = shell('dumpsys notification 2>/dev/null')
+    if not out.strip() or 'Can\'t find service' in out:
+        out = shell('dumpsys notification_manager 2>/dev/null')
+    return out
 
 
 def notif_has_id(nid):
@@ -327,8 +332,11 @@ def step_paste_flow():
 
 
 def step_share_flow():
+    # --es (STRING extra), exactly like Android's share sheet sends
+    # EXTRA_TEXT; --eu would put a Uri in the bundle and ShareActivity
+    # would correctly see null (run #4 bug).
     shell("am start -a android.intent.action.SEND -t 'text/plain' "
-          "--eu android.intent.extra.TEXT '%s' -n %s" % (URL2, SHARE), check=True)
+          "--es android.intent.extra.TEXT '%s' -n %s" % (URL2, SHARE), check=True)
     wait_until('focus back on MainActivity', focused_on_pkg, timeout=20)
     wait_until('second job in JobStore', lambda: len(jobs_state() or []) >= 2, timeout=20)
     record('share intent: ShareActivity logged a second job', True)
