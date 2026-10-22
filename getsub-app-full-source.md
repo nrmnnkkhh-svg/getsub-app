@@ -1,10 +1,11 @@
 # GetSub App — Complete Source Bundle
 
-- Generated (UTC): 2026-10-22 12:07:18
-- Version: v2.5.3 (see `PROJECT_CAPSULE.md` §28)
+- Generated (UTC): 2026-10-22 12:07:50
+- Version: v2.5.3 + CI tooling (see `PROJECT_CAPSULE.md` §28–29)
 - Project root: `~/getsub-app` | Package: `com.getsub.share`
 - Rebuild: `cd ~/getsub-app && bash build.sh`
 - Note: `res/drawable/ic_launcher.png` is binary and excluded; copy it from the repo when rebuilding.
+- CI/test tooling lives in `.github/`, `ci/`, `tests/` (repo-only; not needed to rebuild the app).
 
 ## Contents
 

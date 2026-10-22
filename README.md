@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/nrmnnkkhh-svg/getsub-app/actions/workflows/ci.yml/badge.svg)](https://github.com/nrmnnkkhh-svg/getsub-app/actions/workflows/ci.yml)
 
+[![CI](https://github.com/nrmnnkkhh-svg/getsub-app/actions/workflows/ci.yml/badge.svg)](https://github.com/nrmnnkkhh-svg/getsub-app/actions/workflows/ci.yml)
+
 Custom Android + Termux utility that downloads YouTube subtitles and reformats them into clean, readable plain-text (`.txt`) files in the Android Download folder.
 
 Three entry points share one goal:
@@ -32,6 +34,10 @@ Requirements: `openjdk-21`, `aapt`, `aapt2`, `apksigner`, `dx`, `zip`, `unzip`, 
 | `src/com/getsub/share/` | `ShareActivity` (v2.6 language picker dialog), `MainActivity`, `JobStore`, `Prefs` (saved language), `SubtitleFetcher`, `SubtitleDownloadService` |
 | `build/apk/app.apk` | Built, signed APK |
 | `PROJECT_CAPSULE.md` | Full project memory: history, source, design, troubleshooting |
+| `getsub-app-full-source.md` | Generated full-source snapshot (regenerated on every change per the rule below) |
+| `.github/workflows/ci.yml` | GitHub Actions CI: build + parser suite + emulator UI tests on every push |
+| `ci/` | CI scripts: `run_parser_tests.sh` (suite + golden diff), `emulator_ui_test.py/.sh` (adb-driven UI tests) |
+| `tests/TestParsers.java` | 40-check synthetic battery for `SubtitleFetcher` parsing/formatting |
 | `getsub-app-full-source.md` | Generated full-source snapshot (regenerated on every change per the rule below) |
 | `.github/workflows/ci.yml` | GitHub Actions CI: build + parser suite + emulator UI tests on every push |
 | `ci/` | CI scripts: `run_parser_tests.sh` (suite + golden diff), `emulator_ui_test.py/.sh` (adb-driven UI tests) |
