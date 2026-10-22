@@ -1,11 +1,10 @@
 # GetSub App — Complete Source Bundle
 
-- Generated (UTC): 2026-09-22 13:28:03
-- Version: v2.5.3 + CI tooling (see `PROJECT_CAPSULE.md` §28–29)
+- Generated (UTC): 2026-10-22 12:07:18
+- Version: v2.5.3 (see `PROJECT_CAPSULE.md` §28)
 - Project root: `~/getsub-app` | Package: `com.getsub.share`
 - Rebuild: `cd ~/getsub-app && bash build.sh`
 - Note: `res/drawable/ic_launcher.png` is binary and excluded; copy it from the repo when rebuilding.
-- CI/test tooling lives in `.github/`, `ci/`, `tests/` (repo-only; not needed to rebuild the app).
 
 ## Contents
 
@@ -14,10 +13,9 @@
 3. `res/values/strings.xml`
 4. `src/com/getsub/share/JobStore.java`
 5. `src/com/getsub/share/MainActivity.java`
-6. `src/com/getsub/share/Prefs.java`
-7. `src/com/getsub/share/ShareActivity.java`
-8. `src/com/getsub/share/SubtitleDownloadService.java`
-9. `src/com/getsub/share/SubtitleFetcher.java`
+6. `src/com/getsub/share/ShareActivity.java`
+7. `src/com/getsub/share/SubtitleDownloadService.java`
+8. `src/com/getsub/share/SubtitleFetcher.java`
 
 ---
 
@@ -933,35 +931,6 @@ public class MainActivity extends Activity {
             wrapper.addView(card, wLp);
             return wrapper;
         }
-    }
-}
-```
-
----
-
-## FILE: `src/com/getsub/share/Prefs.java`
-
-```java
-package com.getsub.share;
-
-import android.content.Context;
-import android.content.SharedPreferences;
-
-/** Tiny preference store (v2.6): remembers the last subtitle language used. */
-public class Prefs {
-
-    private static final String FILE = "getsub_prefs";
-    private static final String KEY_LANG = "lang";
-    private static final String DEFAULT_LANG = "en";
-
-    public static String getLang(Context ctx) {
-        SharedPreferences p = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE);
-        return p.getString(KEY_LANG, DEFAULT_LANG);
-    }
-
-    public static void setLang(Context ctx, String lang) {
-        ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
-                .putString(KEY_LANG, lang).apply();
     }
 }
 ```
