@@ -50,6 +50,8 @@ public class MainActivity extends Activity {
     private JobAdapter  adapter;
     /** Signature of the job set currently rendered (v2.5.4, see loadJobs). */
     private String      renderedSig = null;
+    /** Signature of the job set currently rendered (v2.5.4, see loadJobs). */
+    private String      renderedSig = null;
 
     private final Handler  handler = new Handler(Looper.getMainLooper());
     private final Runnable poller  = new Runnable() {

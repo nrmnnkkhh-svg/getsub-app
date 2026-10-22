@@ -1,6 +1,6 @@
 # GetSub App — Complete Source Bundle
 
-- Generated (UTC): 2026-10-22 12:07:50
+- Generated (UTC): 2026-10-22 12:18:36
 - Version: v2.5.3 + CI tooling (see `PROJECT_CAPSULE.md` §28–29)
 - Project root: `~/getsub-app` | Package: `com.getsub.share`
 - Rebuild: `cd ~/getsub-app && bash build.sh`
@@ -409,6 +409,8 @@ public class MainActivity extends Activity {
     private ListView    listView;
     private ProgressBar topProgress;
     private JobAdapter  adapter;
+    /** Signature of the job set currently rendered (v2.5.4, see loadJobs). */
+    private String      renderedSig = null;
     /** Signature of the job set currently rendered (v2.5.4, see loadJobs). */
     private String      renderedSig = null;
 
