@@ -16,7 +16,7 @@ OUT="$ROOT/build/ci-tests"
 rm -rf "$OUT" && mkdir -p "$OUT"
 
 echo "=== compile SubtitleFetcher + TestParsers ==="
-javac -nowarn -classpath "$JAR" -d "$OUT" \
+javac -nowarn -encoding UTF-8 -classpath "$JAR" -d "$OUT" \
   "$ROOT/src/com/getsub/share/SubtitleFetcher.java" \
   "$ROOT/tests/TestParsers.java"
 

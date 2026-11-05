@@ -1,6 +1,6 @@
 # GetSub App — Complete Source Bundle
 
-- Generated (UTC): 2026-10-22 12:18:36
+- Generated (UTC): 2026-11-05 09:20:51
 - Version: v2.5.3 + CI tooling (see `PROJECT_CAPSULE.md` §28–29)
 - Project root: `~/getsub-app` | Package: `com.getsub.share`
 - Rebuild: `cd ~/getsub-app && bash build.sh`
@@ -13,10 +13,11 @@
 2. `build.sh`
 3. `res/values/strings.xml`
 4. `src/com/getsub/share/JobStore.java`
-5. `src/com/getsub/share/MainActivity.java`
-6. `src/com/getsub/share/ShareActivity.java`
-7. `src/com/getsub/share/SubtitleDownloadService.java`
-8. `src/com/getsub/share/SubtitleFetcher.java`
+5. `src/com/getsub/share/Lang.java`
+6. `src/com/getsub/share/MainActivity.java`
+7. `src/com/getsub/share/ShareActivity.java`
+8. `src/com/getsub/share/SubtitleDownloadService.java`
+9. `src/com/getsub/share/SubtitleFetcher.java`
 
 ---
 
@@ -53,7 +54,7 @@
         <activity
             android:name=".ShareActivity"
             android:label="@string/app_name"
-            android:theme="@android:style/Theme.DeviceDefault.Dialog.NoActionBar"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:noHistory="true"
             android:excludeFromRecents="true"
             android:exported="true">
@@ -128,7 +129,7 @@ aapt2 link \
 
 echo "=== Step 3: Compile Java ==="
 javac \
-  -source 1.8 -target 1.8 \
+  -source 1.8 -target 1.8 -encoding UTF-8 \
   -classpath "$ANDROID_JAR" \
   -d "$OBJ" \
   "$GEN/com/getsub/share/R.java" \
@@ -220,18 +221,12 @@ public class JobStore {
     public static final String STATUS_ERROR = "Error";
 
     public static synchronized int addJob(Context ctx, String url) {
-        return addJob(ctx, url, "");
-    }
-
-    /** v2.6: jobs remember which language was requested. */
-    public static synchronized int addJob(Context ctx, String url, String lang) {
         JSONArray jobs = readAll(ctx);
         int id = nextId(jobs);
         JSONObject job = new JSONObject();
         try {
             job.put("id", id);
             job.put("url", url);
-            job.put("lang", lang == null ? "" : lang);
             job.put("status", STATUS_QUEUED);
             job.put("result", "");
             job.put("time", timestamp());
@@ -356,6 +351,116 @@ public class JobStore {
 
 ---
 
+## FILE: `src/com/getsub/share/Lang.java`
+
+```java
+package com.getsub.share;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.graphics.Color;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.ArrayAdapter;
+import android.widget.TextView;
+
+/**
+ * v2.6: subtitle language catalogue + last-used persistence.
+ *
+ * CODES are YouTube caption language codes (what SubtitleFetcher.findTrack
+ * matches exactly); LABELS are human-readable names. The fetcher accepts any
+ * code and lists the codes a video actually has when the requested one is
+ * missing, so this catalogue can grow freely without touching the engine.
+ */
+public final class Lang {
+
+    public static final String[] CODES = {
+            "en", "es", "de", "fr", "it", "pt", "pt-BR", "ru", "uk", "pl",
+            "nl", "tr", "ar", "hi", "ur", "fa", "id", "ms", "vi", "th",
+            "ja", "ko", "zh-Hans", "zh-Hant", "sv", "da", "fi", "no",
+            "cs", "el", "he", "ro", "hu", "ta", "te", "bn"
+    };
+
+    public static final String[] LABELS = {
+            "English", "Spanish", "German", "French", "Italian", "Portuguese",
+            "Portuguese (BR)", "Russian", "Ukrainian", "Polish", "Dutch",
+            "Turkish", "Arabic", "Hindi", "Urdu", "Persian", "Indonesian",
+            "Malay", "Vietnamese", "Thai", "Japanese", "Korean",
+            "Chinese (Simplified)", "Chinese (Traditional)", "Swedish",
+            "Danish", "Finnish", "Norwegian", "Czech", "Greek", "Hebrew",
+            "Romanian", "Hungarian", "Tamil", "Telugu", "Bengali"
+    };
+
+    private static final String PREFS = "getsub_prefs";
+    private static final String KEY = "lang_index";
+
+    private Lang() {
+    }
+
+    /** "en — English" style entries for spinners. */
+    public static String[] displayLabels() {
+        String[] out = new String[CODES.length];
+        for (int i = 0; i < CODES.length; i++) {
+            out[i] = CODES[i] + " \u2014 " + LABELS[i];
+        }
+        return out;
+    }
+
+    public static String codeAt(int index) {
+        if (index < 0 || index >= CODES.length) {
+            return "en";
+        }
+        return CODES[index];
+    }
+
+    public static int loadIndex(Context ctx) {
+        SharedPreferences p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        int i = p.getInt(KEY, 0);
+        return (i >= 0 && i < CODES.length) ? i : 0;
+    }
+
+    public static void saveIndex(Context ctx, int index) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .edit().putInt(KEY, index).apply();
+    }
+
+    /** Dark-themed adapter for the app's own UI (white text on dark surface). */
+    public static ArrayAdapter<String> darkAdapter(final Context ctx) {
+        return new ArrayAdapter<String>(ctx, android.R.layout.simple_spinner_item, displayLabels()) {
+            {
+                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            }
+
+            @Override
+            public View getView(int position, View convertView, ViewGroup parent) {
+                TextView tv = (TextView) super.getView(position, convertView, parent);
+                tv.setTextColor(Color.WHITE);
+                tv.setTextSize(13);
+                return tv;
+            }
+
+            @Override
+            public View getDropDownView(int position, View convertView, ViewGroup parent) {
+                TextView tv = (TextView) super.getDropDownView(position, convertView, parent);
+                tv.setTextColor(0xFF111111);
+                tv.setTextSize(15);
+                return tv;
+            }
+        };
+    }
+
+    /** Plain adapter for the light system dialog (share-flow picker). */
+    public static ArrayAdapter<String> plainAdapter(Context ctx) {
+        ArrayAdapter<String> a = new ArrayAdapter<String>(
+                ctx, android.R.layout.simple_spinner_item, displayLabels());
+        a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        return a;
+    }
+}
+```
+
+---
+
 ## FILE: `src/com/getsub/share/MainActivity.java`
 
 ```java
@@ -382,6 +487,7 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ProgressBar;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -409,8 +515,6 @@ public class MainActivity extends Activity {
     private ListView    listView;
     private ProgressBar topProgress;
     private JobAdapter  adapter;
-    /** Signature of the job set currently rendered (v2.5.4, see loadJobs). */
-    private String      renderedSig = null;
     /** Signature of the job set currently rendered (v2.5.4, see loadJobs). */
     private String      renderedSig = null;
 
@@ -525,18 +629,13 @@ public class MainActivity extends Activity {
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         editLp.setMargins(0, 0, dp(10), 0);
 
-        // v2.6: narrow language field; empty means "use my saved default".
-        final EditText langInput = new EditText(this);
-        langInput.setHint(Prefs.getLang(this));
-        langInput.setHintTextColor(C_TEXT2);
-        langInput.setTextColor(C_TEXT1);
-        langInput.setTextSize(14);
-        langInput.setSingleLine(true);
-        langInput.setBackground(roundRect(C_INPUT, dp(12)));
-        langInput.setPadding(dp(10), dp(14), dp(10), dp(14));
-        LinearLayout.LayoutParams langLp = new LinearLayout.LayoutParams(
-                dp(52), LinearLayout.LayoutParams.WRAP_CONTENT);
-        langLp.setMargins(0, 0, dp(10), 0);
+        // v2.6: subtitle language selector (persisted between launches).
+        // Must exist before the Get button's listener captures it.
+        final Spinner langSpinner = new Spinner(this);
+        langSpinner.setAdapter(Lang.darkAdapter(this));
+        langSpinner.setSelection(Lang.loadIndex(this));
+        langSpinner.setBackground(roundRect(C_INPUT, dp(12)));
+        langSpinner.setPadding(dp(12), dp(6), dp(8), dp(6));
 
         Button fetchBtn = new Button(this);
         fetchBtn.setText("Get");
@@ -555,34 +654,49 @@ public class MainActivity extends Activity {
                             "Paste a YouTube link first", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                String lang = langInput.getText().toString().trim();
-                if (lang.isEmpty()) {
-                    lang = Prefs.getLang(MainActivity.this);
-                } else {
-                    Prefs.setLang(MainActivity.this, lang);
-                }
-                int jobId = JobStore.addJob(MainActivity.this, text, lang);
+                int langIdx = langSpinner.getSelectedItemPosition();
+                Lang.saveIndex(MainActivity.this, langIdx);
+                String langCode = Lang.codeAt(langIdx);
+                int jobId = JobStore.addJob(MainActivity.this, text);
                 Intent si = new Intent(MainActivity.this, SubtitleDownloadService.class);
                 si.putExtra(SubtitleDownloadService.EXTRA_JOB_ID, jobId);
                 si.putExtra(SubtitleDownloadService.EXTRA_URL, text);
-                si.putExtra(SubtitleDownloadService.EXTRA_LANG, lang);
+                si.putExtra(SubtitleDownloadService.EXTRA_LANG, langCode);
                 startForegroundService(si);
                 urlInput.setText("");
-                // v2.6.1: don't let the keyboard linger after Get (and don't
-                // let a still-focused field re-show the IME on next resume —
-                // run #9 showed it covering the job list).
-                urlInput.clearFocus();
-                langInput.clearFocus();
                 Toast.makeText(MainActivity.this,
-                        "GetSub: fetching " + lang + " subtitles...", Toast.LENGTH_SHORT).show();
+                        "GetSub: fetching " + langCode + " subtitles...", Toast.LENGTH_SHORT).show();
                 loadJobs();
             }
         });
 
         inputRow.addView(urlInput, editLp);
-        inputRow.addView(langInput, langLp);
         inputRow.addView(fetchBtn);
         header.addView(inputRow, inputRowLp);
+
+        // Language row (v2.6): muted label + the styled spinner
+        LinearLayout langRow = new LinearLayout(this);
+        langRow.setOrientation(LinearLayout.HORIZONTAL);
+        langRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams langRowLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        langRowLp.setMargins(0, dp(10), 0, 0);
+
+        TextView langLabel = new TextView(this);
+        langLabel.setText("LANGUAGE");
+        langLabel.setTextColor(C_TEXT2);
+        langLabel.setTextSize(10);
+        langLabel.setTypeface(null, Typeface.BOLD);
+        langLabel.setLetterSpacing(0.15f);
+        LinearLayout.LayoutParams langLabelLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        langLabelLp.setMargins(dp(4), 0, dp(12), 0);
+        langRow.addView(langLabel, langLabelLp);
+        langRow.addView(langSpinner, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        header.addView(langRow, langRowLp);
 
         root.addView(header);
 
@@ -946,107 +1060,110 @@ public class MainActivity extends Activity {
 package com.getsub.share;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Bundle;
-import android.view.View;
-import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.LinearLayout;
-import android.widget.ListView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.util.ArrayList;
-import java.util.List;
-
 /**
- * Share-sheet entry point. v2.6: instead of firing immediately with a
- * hardcoded language, shows a tiny language picker (the activity itself is
- * dialog-themed in the manifest) and starts the download in the chosen
- * language. The hands-free flow now costs exactly one tap.
+ * Share-sheet entry point.
+ *
+ * v2.6: shows a small language picker before fetching (the share intent
+ * carries only the link, so the language must be chosen here; v1.2-v2.5
+ * silently used "en"). Shown from this otherwise invisible activity
+ * (Theme.Translucent.NoTitleBar), so the share sheet still feels instant.
  */
 public class ShareActivity extends Activity {
 
-    private static final String[][] LANGS = {
-            {"en", "English"}, {"es", "Spanish"}, {"de", "German"}, {"fr", "French"},
-            {"pt", "Portuguese"}, {"ru", "Russian"}, {"ja", "Japanese"}, {"ko", "Korean"},
-            {"hi", "Hindi"}, {"ar", "Arabic"}, {"id", "Indonesian"}, {"tr", "Turkish"},
-            {"it", "Italian"}, {"nl", "Dutch"}, {"pl", "Polish"}, {"sv", "Swedish"},
-    };
-
-    private String sharedText;
+    private boolean started = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        String sharedText = null;
         Intent in = getIntent();
         if (in != null && Intent.ACTION_SEND.equals(in.getAction())) {
             sharedText = in.getStringExtra(Intent.EXTRA_TEXT);
         }
+
         if (sharedText == null || sharedText.trim().length() == 0) {
             Toast.makeText(this, "GetSub: no link found in share", Toast.LENGTH_SHORT).show();
             finish();
             return;
         }
-        sharedText = sharedText.trim();
 
-        String defaultLang = Prefs.getLang(this);
+        final String text = sharedText.trim();
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(24, 24, 24, 12);
+        final Spinner spinner = new Spinner(this);
+        ArrayAdapter<String> adapter = Lang.plainAdapter(this);
+        spinner.setAdapter(adapter);
+        spinner.setSelection(Lang.loadIndex(this));
 
-        TextView title = new TextView(this);
-        title.setText("Get subtitles in:");
-        title.setTextSize(16);
-        root.addView(title);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(24), dp(16), dp(24), dp(0));
 
-        final List<String> codes = new ArrayList<String>();
-        List<String> labels = new ArrayList<String>();
-        if (!knownCode(defaultLang)) {
-            codes.add(defaultLang);
-            labels.add(defaultLang + "  (default)");
-        }
-        for (String[] pair : LANGS) {
-            codes.add(pair[0]);
-            labels.add(pair[0] + "  " + pair[1]
-                    + (pair[0].equals(defaultLang) ? "  (default)" : ""));
-        }
+        TextView hint = new TextView(this);
+        hint.setText("Subtitle language");
+        hint.setTextSize(13);
+        box.addView(hint, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        box.addView(spinner, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
 
-        ListView list = new ListView(this);
-        list.setAdapter(new ArrayAdapter<String>(this,
-                android.R.layout.simple_list_item_1, labels));
-        list.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            @Override
-            public void onItemClick(AdapterView<?> parent, View view, int pos, long id) {
-                startJob(codes.get(pos));
-            }
-        });
-        root.addView(list);
-
-        setContentView(root);
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
+                .setTitle("GetSub - fetch subtitles?")
+                .setView(box)
+                .setPositiveButton("Fetch", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int which) {
+                        int idx = spinner.getSelectedItemPosition();
+                        Lang.saveIndex(ShareActivity.this, idx);
+                        startJob(text, Lang.codeAt(idx));
+                        finish();
+                    }
+                })
+                .setNegativeButton("Cancel", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface d, int which) {
+                        finish();
+                    }
+                })
+                .setOnCancelListener(new DialogInterface.OnCancelListener() {
+                    @Override
+                    public void onCancel(DialogInterface d) {
+                        finish();
+                    }
+                });
+        b.show();
     }
 
-    private static boolean knownCode(String code) {
-        for (String[] pair : LANGS) {
-            if (pair[0].equals(code)) {
-                return true;
-            }
+    /** Log the job and hand off to the download service (pre-v2.6 flow). */
+    private void startJob(String sharedText, String lang) {
+        if (started) {
+            return;
         }
-        return false;
-    }
-
-    private void startJob(String lang) {
-        int jobId = JobStore.addJob(this, sharedText, lang);
-        Intent si = new Intent(this, SubtitleDownloadService.class);
-        si.putExtra(SubtitleDownloadService.EXTRA_JOB_ID, jobId);
-        si.putExtra(SubtitleDownloadService.EXTRA_URL, sharedText);
-        si.putExtra(SubtitleDownloadService.EXTRA_LANG, lang);
-        startForegroundService(si);
+        started = true;
+        int jobId = JobStore.addJob(this, sharedText);
+        Intent serviceIntent = new Intent(this, SubtitleDownloadService.class);
+        serviceIntent.putExtra(SubtitleDownloadService.EXTRA_JOB_ID, jobId);
+        serviceIntent.putExtra(SubtitleDownloadService.EXTRA_URL, sharedText);
+        serviceIntent.putExtra(SubtitleDownloadService.EXTRA_LANG, lang);
+        startForegroundService(serviceIntent);
         Toast.makeText(this, "GetSub: fetching " + lang + " subtitles...",
                 Toast.LENGTH_SHORT).show();
-        finish();
+    }
+
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
     }
 }
 ```

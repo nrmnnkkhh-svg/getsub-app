@@ -48,7 +48,7 @@ aapt2 link \
 
 echo "=== Step 3: Compile Java ==="
 javac \
-  -source 1.8 -target 1.8 \
+  -source 1.8 -target 1.8 -encoding UTF-8 \
   -classpath "$ANDROID_JAR" \
   -d "$OBJ" \
   "$GEN/com/getsub/share/R.java" \

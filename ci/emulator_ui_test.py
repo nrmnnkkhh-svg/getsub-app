@@ -228,6 +228,13 @@ def job_statuses(root):
             if n.get('text') in ('QUEUED', 'DONE', 'ERROR')]
 
 
+def button_like(root, label_upper):
+    """Buttons whose label matches case-insensitively (AOSP uppercases
+    dialog button labels in the accessibility tree; app buttons keep case)."""
+    return [n for n in nodes(root, cls='android.widget.Button')
+            if (n.get('text') or '').strip().upper() == label_upper]
+
+
 def focused_on_pkg():
     out = shell('dumpsys window | grep -E "mCurrentFocus|mFocusedApp"')
     return PKG in out
@@ -268,6 +275,7 @@ def step_home_ui():
         ('tagline', nodes(root, text_contains='subtitle downloader')),
         ('link input field', nodes(root, cls='android.widget.EditText')),
         ('Get button', nodes(root, text='Get')),
+        ('language selector (v2.6)', nodes(root, cls='android.widget.Spinner')),
         ('RECENT DOWNLOADS label', nodes(root, text='RECENT DOWNLOADS')),
         ('CLEAR button', nodes(root, text='CLEAR')),
         ('empty state ("No downloads yet")', nodes(root, text='No downloads yet')),
@@ -337,6 +345,17 @@ def step_share_flow():
     # would correctly see null (run #4 bug).
     shell("am start -a android.intent.action.SEND -t 'text/plain' "
           "--es android.intent.extra.TEXT '%s' -n %s" % (URL2, SHARE), check=True)
+
+    # v2.6: the share flow shows a language picker before fetching.
+    wait_until('share-flow language picker',
+               lambda: nodes(dump_ui(), text_contains='fetch subtitles'), timeout=20)
+    record('share intent: language picker shown (v2.6)', True)
+    screenshot('share_picker')
+    fetch_btns = button_like(dump_ui(), 'FETCH')
+    if not fetch_btns:
+        raise RuntimeError('picker Fetch button not found')
+    tap_node(fetch_btns[0])
+
     wait_until('focus back on MainActivity', focused_on_pkg, timeout=20)
     wait_until('second job in JobStore', lambda: len(jobs_state() or []) >= 2, timeout=20)
     record('share intent: ShareActivity logged a second job', True)
@@ -364,8 +383,7 @@ def step_clear():
     # accessibility tree ("CLEAR", not "Clear") — match case-insensitively
     # and keep the class filter so the section-header CLEAR TextView
     # (not a Button) can't collide.
-    btns = [n for n in nodes(dump_ui(), cls='android.widget.Button')
-            if (n.get('text') or '').strip().upper() == 'CLEAR']
+    btns = button_like(dump_ui(), 'CLEAR')
     if not btns:
         raise RuntimeError('dialog Clear button not found')
     tap_node(btns[0])
@@ -428,6 +446,17 @@ DIALOG_XML = '''<hierarchy rotation="0">
  </node>
 </hierarchy>'''
 
+PICKER_XML = '''<hierarchy rotation="0">
+ <node class="android.widget.FrameLayout" bounds="[0,0][1080,1920]" package="com.getsub.share">
+  <node class="android.widget.TextView" resource-id="android:id/alertTitle" text="GetSub - fetch subtitles?" bounds="[120,600][960,680]"/>
+  <node class="android.widget.Spinner" bounds="[120,760][960,880]">
+   <node class="android.widget.TextView" text="en — English" bounds="[140,780][700,860]"/>
+  </node>
+  <node class="android.widget.Button" resource-id="android:id/button2" text="CANCEL" bounds="[500,920][700,1000]"/>
+  <node class="android.widget.Button" resource-id="android:id/button1" text="FETCH" bounds="[740,920][940,1000]"/>
+ </node>
+</hierarchy>'''
+
 
 def selftest():
     fails = 0
@@ -458,6 +487,13 @@ def selftest():
         ('dialog positive button (exact text+class)',
          len(nodes(root3, text='Clear', cls='android.widget.Button')) == 1),
         ('dialog button center math', center(nodes(root3, text='Clear')[0]) == (840, 1040)),
+    ]
+    root4 = ET.fromstring(PICKER_XML)
+    checks += [
+        ('v2.6 picker title found', len(nodes(root4, text_contains='fetch subtitles')) == 1),
+        ('v2.6 picker spinner present', len(nodes(root4, cls='android.widget.Spinner')) == 1),
+        ('v2.6 picker FETCH matched case-insensitively', len(button_like(root4, 'FETCH')) == 1),
+        ('v2.6 picker CANCEL not confused with FETCH', len(button_like(root4, 'CANCEL')) == 1),
     ]
     for name, ok in checks:
         print(('PASS  ' if ok else 'FAIL  ') + name)

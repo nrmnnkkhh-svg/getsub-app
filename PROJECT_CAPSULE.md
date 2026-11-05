@@ -1605,3 +1605,22 @@ Same keystore, so it installs as a clean upgrade. One difference from before: th
 - **Benefits:** less view churn and battery use, smoother scrolling, and settled screens that accessibility tooling (and CI visual checks) can capture.
 - **Verified:** local build green; parser suite untouched (no fetcher change); driver selftest 14/14; CI run #4 = on-device verdict.
 
+## 32. Stage 3 — CI signs with the phone keystore (GitHub Secret) + version stamping (Sep 21, 2026)
+
+- **Secret:** `GETSUB_KEYSTORE_B64` = base64 of the phone's `~/.debug.keystore`, set by the user directly from Termux via `gh secret set` (the value never passes through the AI/sandbox). The workflow decodes it when present and hands it to `build.sh` via the existing `GETSUB_KEYSTORE` override; without it, an ephemeral key is generated and the log says so loudly. Alias/passwords (`debug`/`android`) match the project's one-time setup, so `build.sh` defaults suffice.
+- **Version stamping:** `build.sh` Step 2 now accepts `GETSUB_VERSION_NAME` / `GETSUB_VERSION_CODE` → `aapt2 link --version-name/--version-code`. CI stamps `ci-<run_number>` (the run number links straight to the exact CI build); Termux builds stay unstamped. `MainActivity`'s tagline appends the versionName when present ("YouTube subtitle downloader · ci-47").
+- **Upgrade semantics:** versionCode = run number (monotonic). Consequence: installing an unstamped Termux build (code 0) over a stamped CI build is a version downgrade and Android will refuse it — CI is now the primary install channel by design.
+- **One-time migration:** the APK currently on the phone carries run #6's ephemeral signature, so the first secret-signed install still needs one uninstall (history list resets; saved .txt files stay). Every install after that is a seamless upgrade.
+- **Verified:** local build with stamping (`aapt2 dump badging` shows versionName/Code), parser suite + golden identical, driver selftest 14/14; CI verdict = the first run after this commit.
+
+## 33. v2.6 — subtitle language picker (Sep 22, 2026)
+
+- **What:** the app no longer hardcodes `en`. New `Lang.java` holds a catalogue of 36 caption language codes (YouTube codes: `en`, `es`, `pt-BR`, `zh-Hans`, …) with human labels, plus the last-used selection persisted in `SharedPreferences` (`getsub_prefs/lang_index`).
+  - **In-app (paste flow):** a styled dark `Spinner` under the link field ("LANGUAGE  en — English"). The Get button passes the chosen code to the service (`EXTRA_LANG`), saves it as the new default, and the toast names the language ("fetching es subtitles...").
+  - **Share flow:** `ShareActivity` now shows a small confirm dialog — "GetSub - fetch subtitles?" with the same spinner and Fetch/Cancel — before starting the job (the old capsule "open idea" realised). This required its theme to move from `Theme.NoDisplay` to `Theme.Translucent.NoTitleBar` (NoDisplay cannot reliably host dialogs). It still disappears instantly after the tap and logs the job via the same `JobStore` + `startForegroundService` path.
+- **Engine untouched:** `SubtitleFetcher.findTrack` already accepted any code and errors with the available codes list when one is missing, so the catalogue can grow without touching fetch logic.
+- **CI driver updated:** home-UI check adds the spinner; the share-flow step now waits for the picker, screenshots it, taps FETCH (matched case-insensitively via the new `button_like` helper — AOSP uppercases dialog buttons) and then continues the previous assertions. Selftest grew 4 checks for the picker XML (title, spinner, FETCH, CANCEL).
+- **Edge cases:** cancel/back dismisses the picker and finishes the activity; double-start is guarded (`started` flag); a fresh install defaults to English and remembers your choice afterwards.
+- **Verified locally:** build green, parser suite + golden identical, selftest 18/18; bundle now exports 9 files (Lang.java added). CI verdict = the run after this commit.
+- **Bonus portability fix found during verification:** `javac` inherits the shell locale and defaults to US-ASCII under a POSIX locale, which turns every UTF-8 em-dash/box-drawing char in the sources into an "unmappable character" error. `build.sh` and `ci/run_parser_tests.sh` now pass `-encoding UTF-8` explicitly — the build no longer depends on the caller's `LANG`.
+

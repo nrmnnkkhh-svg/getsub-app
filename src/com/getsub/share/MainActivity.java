@@ -21,6 +21,7 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ProgressBar;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -48,8 +49,6 @@ public class MainActivity extends Activity {
     private ListView    listView;
     private ProgressBar topProgress;
     private JobAdapter  adapter;
-    /** Signature of the job set currently rendered (v2.5.4, see loadJobs). */
-    private String      renderedSig = null;
     /** Signature of the job set currently rendered (v2.5.4, see loadJobs). */
     private String      renderedSig = null;
 
@@ -164,18 +163,13 @@ public class MainActivity extends Activity {
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
         editLp.setMargins(0, 0, dp(10), 0);
 
-        // v2.6: narrow language field; empty means "use my saved default".
-        final EditText langInput = new EditText(this);
-        langInput.setHint(Prefs.getLang(this));
-        langInput.setHintTextColor(C_TEXT2);
-        langInput.setTextColor(C_TEXT1);
-        langInput.setTextSize(14);
-        langInput.setSingleLine(true);
-        langInput.setBackground(roundRect(C_INPUT, dp(12)));
-        langInput.setPadding(dp(10), dp(14), dp(10), dp(14));
-        LinearLayout.LayoutParams langLp = new LinearLayout.LayoutParams(
-                dp(52), LinearLayout.LayoutParams.WRAP_CONTENT);
-        langLp.setMargins(0, 0, dp(10), 0);
+        // v2.6: subtitle language selector (persisted between launches).
+        // Must exist before the Get button's listener captures it.
+        final Spinner langSpinner = new Spinner(this);
+        langSpinner.setAdapter(Lang.darkAdapter(this));
+        langSpinner.setSelection(Lang.loadIndex(this));
+        langSpinner.setBackground(roundRect(C_INPUT, dp(12)));
+        langSpinner.setPadding(dp(12), dp(6), dp(8), dp(6));
 
         Button fetchBtn = new Button(this);
         fetchBtn.setText("Get");
@@ -194,34 +188,49 @@ public class MainActivity extends Activity {
                             "Paste a YouTube link first", Toast.LENGTH_SHORT).show();
                     return;
                 }
-                String lang = langInput.getText().toString().trim();
-                if (lang.isEmpty()) {
-                    lang = Prefs.getLang(MainActivity.this);
-                } else {
-                    Prefs.setLang(MainActivity.this, lang);
-                }
-                int jobId = JobStore.addJob(MainActivity.this, text, lang);
+                int langIdx = langSpinner.getSelectedItemPosition();
+                Lang.saveIndex(MainActivity.this, langIdx);
+                String langCode = Lang.codeAt(langIdx);
+                int jobId = JobStore.addJob(MainActivity.this, text);
                 Intent si = new Intent(MainActivity.this, SubtitleDownloadService.class);
                 si.putExtra(SubtitleDownloadService.EXTRA_JOB_ID, jobId);
                 si.putExtra(SubtitleDownloadService.EXTRA_URL, text);
-                si.putExtra(SubtitleDownloadService.EXTRA_LANG, lang);
+                si.putExtra(SubtitleDownloadService.EXTRA_LANG, langCode);
                 startForegroundService(si);
                 urlInput.setText("");
-                // v2.6.1: don't let the keyboard linger after Get (and don't
-                // let a still-focused field re-show the IME on next resume —
-                // run #9 showed it covering the job list).
-                urlInput.clearFocus();
-                langInput.clearFocus();
                 Toast.makeText(MainActivity.this,
-                        "GetSub: fetching " + lang + " subtitles...", Toast.LENGTH_SHORT).show();
+                        "GetSub: fetching " + langCode + " subtitles...", Toast.LENGTH_SHORT).show();
                 loadJobs();
             }
         });
 
         inputRow.addView(urlInput, editLp);
-        inputRow.addView(langInput, langLp);
         inputRow.addView(fetchBtn);
         header.addView(inputRow, inputRowLp);
+
+        // Language row (v2.6): muted label + the styled spinner
+        LinearLayout langRow = new LinearLayout(this);
+        langRow.setOrientation(LinearLayout.HORIZONTAL);
+        langRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams langRowLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        langRowLp.setMargins(0, dp(10), 0, 0);
+
+        TextView langLabel = new TextView(this);
+        langLabel.setText("LANGUAGE");
+        langLabel.setTextColor(C_TEXT2);
+        langLabel.setTextSize(10);
+        langLabel.setTypeface(null, Typeface.BOLD);
+        langLabel.setLetterSpacing(0.15f);
+        LinearLayout.LayoutParams langLabelLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        langLabelLp.setMargins(dp(4), 0, dp(12), 0);
+        langRow.addView(langLabel, langLabelLp);
+        langRow.addView(langSpinner, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        header.addView(langRow, langRowLp);
 
         root.addView(header);
 
