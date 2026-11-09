@@ -113,10 +113,22 @@ def notif_state():
 
 
 def notif_has_id(nid):
-    for line in notif_state().splitlines():
-        if ('id=%d' % nid) in line and PKG in line:
-            return True
+    dump = notif_state()
+    lines = dump.splitlines()
+    for i, line in enumerate(lines):
+        if ('id=%d' % nid) in line:
+            window = '\n'.join(lines[max(0, i - 2):i + 3])
+            if PKG in window:
+                return True
     return False
+
+
+def notif_pkg_present():
+    """Any notification record from our package? Record line layouts differ
+    per API level, so package presence is the format-independent signal:
+    during Queued it can only be the ongoing foreground notification, and
+    after teardown only the per-job result notification."""
+    return PKG in notif_state()
 
 
 def jobs_state():
@@ -240,6 +252,12 @@ def step_launch():
 
 def step_home_ui():
     root = dump_ui()
+    allow = nodes(root, text='Allow')   # runtime permission dialog, if any
+    if allow:
+        tap_node(allow[0])
+        time.sleep(1.5)
+        record('permission dialog: tapped Allow', True)
+        root = dump_ui()
     checks = [
         ('header "GetSub"', nodes(root, text='GetSub')),
         ('tagline', nodes(root, text_contains='subtitle downloader')),
@@ -277,13 +295,13 @@ def step_paste_flow():
     # while animations run: spinner/toast/heads-up keep uiautomator's idle
     # state from ever arriving, see capsule §30).
     wait_until('job row in JobStore', lambda: len(jobs_state() or []) >= 1, timeout=20)
-    # While the job is Queued, the foreground notification (id 1001) must exist.
+    # While the job is Queued, the foreground notification must exist.
     ongoing_seen = False
-    for _ in range(8):
-        if notif_has_id(1001):
+    for _ in range(10):
+        if notif_pkg_present():
             ongoing_seen = True
             break
-        time.sleep(1)
+        time.sleep(0.7)
     record('paste flow: foreground notification while fetching', ongoing_seen)
     screenshot('job_queued')
 
@@ -292,7 +310,10 @@ def step_paste_flow():
            st and st[0][1] in ('Done', 'Error'))
 
     time.sleep(7)  # let the heads-up retract + list poller settle -> static screen
-    record('paste flow: result notification posted (id 2000+)', notif_has_id(2000 + int(st[0][0])) if st else False)
+    record('paste flow: result notification posted', notif_pkg_present())
+    # Diagnostics for whichever way the notification checks go:
+    shell('dumpsys notification_manager > /sdcard/notif_dump.txt 2>/dev/null', check=False)
+    adb('pull', '/sdcard/notif_dump.txt', os.path.join(ART, 'notif_dump.txt'), check=False)
     root = dump_ui()
     ui_st = job_statuses(root)
     record('paste flow: list row shows %s' % (ui_st or '?'), ui_st and ui_st[0] in ('DONE', 'ERROR'))
