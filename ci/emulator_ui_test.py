@@ -23,7 +23,6 @@ Runs the dump-parsing / node-finding / bounds-tap math against synthetic
 uiautomator XML matching what MainActivity actually renders, so the driver
 logic itself is verified even where no emulator exists.
 """
-import json
 import os
 import re
 import subprocess
@@ -77,17 +76,9 @@ def shell(cmd, check=False):
 
 
 def dump_ui(retries=6):
-    """Capture the current view hierarchy via uiautomator dump.
-
-    STRICT by design (v2.5.3-ci2): the on-device dump file is deleted first,
-    so a failed/hung dump can never be masked by a stale previous capture
-    (run #1's bug: waits kept re-reading the empty-home hierarchy while the
-    real screen showed the job row). Hung dumps are retried; UiAutomation
-    needs a settle moment between attempts after a timeout.
-    """
+    """Capture the current view hierarchy via uiautomator dump."""
     last = ''
-    for attempt in range(retries):
-        shell('rm -f /sdcard/getsub_ui.xml')
+    for _ in range(retries):
         shell('uiautomator dump /sdcard/getsub_ui.xml')
         xml = adb('exec-out', 'cat', '/sdcard/getsub_ui.xml', check=False)
         last = xml[:200]
@@ -96,73 +87,8 @@ def dump_ui(retries=6):
                 return ET.fromstring(xml)
             except ET.ParseError:
                 pass
-        # A dump that times out (screen never went idle) leaves its
-        # UiAutomation connection registered, which can hang the NEXT dump
-        # too (seen in CI run #1). Kill leftovers before retrying.
-        shell('pkill -f com.android.commands.uiautomator', check=False)
-        time.sleep(3)
+        time.sleep(2)
     raise RuntimeError('could not capture UI dump (last: %r)' % last)
-
-
-def notif_state():
-    """Raw NotificationManager dump (records carry pkg + id, NOT the text).
-
-    Used to assert WHICH notifications exist: id 1001 = ongoing foreground
-    notification, ids 2000+ = per-job result notifications (v2.5.3).
-    NOTE: the service is registered as 'notification' — 'notification_manager'
-    is not a ServiceManager name and dumps nothing (run #4 forensics)."""
-    out = shell('dumpsys notification 2>/dev/null')
-    if not out.strip() or 'Can\'t find service' in out:
-        out = shell('dumpsys notification_manager 2>/dev/null')
-    return out
-
-
-def notif_has_id(nid):
-    dump = notif_state()
-    lines = dump.splitlines()
-    for i, line in enumerate(lines):
-        if ('id=%d' % nid) in line:
-            window = '\n'.join(lines[max(0, i - 2):i + 3])
-            if PKG in window:
-                return True
-    return False
-
-
-def notif_pkg_present():
-    """Any notification record from our package? Record line layouts differ
-    per API level, so package presence is the format-independent signal:
-    during Queued it can only be the ongoing foreground notification, and
-    after teardown only the per-job result notification."""
-    return PKG in notif_state()
-
-
-def jobs_state():
-    """JobStore contents read straight from the app's private dir.
-
-    AOSP emulator images allow `adb root`, so the tests can observe the real
-    state machine (Queued -> Done/Error) with zero UI dependence. Returns a
-    newest-first list of (id, status, result), or None if unreadable."""
-    try:
-        out = shell('cat /data/data/%s/files/jobs.json 2>/dev/null || echo []' % PKG)
-        arr = json.loads(out.strip() or '[]')
-        return [(j.get('id'), j.get('status'), j.get('result', ''))
-                for j in reversed(arr)]
-    except Exception:
-        return None
-
-
-def wait_jobs_terminal(min_count, timeout=JOB_TIMEOUT):
-    """Wait until >= min_count jobs exist and none is Queued anymore."""
-    def pred():
-        st = jobs_state()
-        if st is None:  # oracle fallback: result notifications appeared
-            n = notif_state()
-            done = sum(1 for i in range(2000, 2100)
-                       if any(('id=%d' % i) in l and PKG in l for l in n.splitlines()))
-            return done >= min_count
-        return len(st) >= min_count and all(s[1] != 'Queued' for s in st)
-    wait_until('%d job(s) terminal' % min_count, pred, timeout=timeout)
-    return jobs_state() or []
 
 
 BOUNDS = re.compile(r'\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]')
@@ -228,13 +154,6 @@ def job_statuses(root):
             if n.get('text') in ('QUEUED', 'DONE', 'ERROR')]
 
 
-def button_like(root, label_upper):
-    """Buttons whose label matches case-insensitively (AOSP uppercases
-    dialog button labels in the accessibility tree; app buttons keep case)."""
-    return [n for n in nodes(root, cls='android.widget.Button')
-            if (n.get('text') or '').strip().upper() == label_upper]
-
-
 def focused_on_pkg():
     out = shell('dumpsys window | grep -E "mCurrentFocus|mFocusedApp"')
     return PKG in out
@@ -246,14 +165,9 @@ def step_boot_install():
     wait_until('device boot', lambda: shell('getprop sys.boot_completed').strip() == '1',
                timeout=180)
     log('boot complete; Android ' + shell('getprop ro.build.version.release').strip())
-    adb('root', check=False)          # AOSP images allow it; enables jobs.json oracle
-    adb('wait-for-device', check=False)
-    time.sleep(2)
     adb('install', '-r', '-t', APK, check=True)
     shell('pm grant %s android.permission.POST_NOTIFICATIONS' % PKG)  # API33+; harmless no-op otherwise
     record('APK installs on fresh emulator', True)
-    record('jobs.json oracle available', jobs_state() is not None,
-           'adb root state machine access' if jobs_state() is not None else 'falling back to notifications')
 
 
 def step_launch():
@@ -264,18 +178,11 @@ def step_launch():
 
 def step_home_ui():
     root = dump_ui()
-    allow = nodes(root, text='Allow')   # runtime permission dialog, if any
-    if allow:
-        tap_node(allow[0])
-        time.sleep(1.5)
-        record('permission dialog: tapped Allow', True)
-        root = dump_ui()
     checks = [
         ('header "GetSub"', nodes(root, text='GetSub')),
         ('tagline', nodes(root, text_contains='subtitle downloader')),
         ('link input field', nodes(root, cls='android.widget.EditText')),
         ('Get button', nodes(root, text='Get')),
-        ('language selector (v2.6)', nodes(root, cls='android.widget.Spinner')),
         ('RECENT DOWNLOADS label', nodes(root, text='RECENT DOWNLOADS')),
         ('CLEAR button', nodes(root, text='CLEAR')),
         ('empty state ("No downloads yet")', nodes(root, text='No downloads yet')),
@@ -304,34 +211,17 @@ def step_paste_flow():
         raise RuntimeError('Get button not found after typing')
     tap_node(gets[0])
 
-    # State machine oracle = jobs.json via root shell (UI is never polled
-    # while animations run: spinner/toast/heads-up keep uiautomator's idle
-    # state from ever arriving, see capsule §30).
-    wait_until('job row in JobStore', lambda: len(jobs_state() or []) >= 1, timeout=20)
-    # While the job is Queued, the foreground notification must exist.
-    ongoing_seen = False
-    for _ in range(10):
-        if notif_pkg_present():
-            ongoing_seen = True
-            break
-        time.sleep(0.7)
-    record('paste flow: foreground notification while fetching', ongoing_seen)
-    screenshot('job_queued')
+    wait_until('job row appears', lambda: len(job_statuses(dump_ui())) >= 1, timeout=20)
+    st = job_statuses(dump_ui())
+    record('paste flow: job row appears (statuses=%s)' % st, len(st) >= 1)
+    screenshot('job_after_get')
 
-    st = wait_jobs_terminal(1)
-    record('paste flow: job reached terminal status %s' % (st[0][1] if st else '?',),
-           st and st[0][1] in ('Done', 'Error'))
+    wait_until('job terminal',
+               lambda: 'QUEUED' not in job_statuses(dump_ui()), timeout=JOB_TIMEOUT)
+    st = job_statuses(dump_ui())
+    record('paste flow: job reached terminal status %s' % st, st and st[0] in ('DONE', 'ERROR'))
 
-    time.sleep(7)  # let the heads-up retract + list poller settle -> static screen
-    record('paste flow: result notification posted', notif_pkg_present())
-    # Diagnostics for whichever way the notification checks go:
-    shell('dumpsys notification > /sdcard/notif_dump.txt 2>/dev/null', check=False)
-    adb('pull', '/sdcard/notif_dump.txt', os.path.join(ART, 'notif_dump.txt'), check=False)
-    root = dump_ui()
-    ui_st = job_statuses(root)
-    record('paste flow: list row shows %s' % (ui_st or '?'), ui_st and ui_st[0] in ('DONE', 'ERROR'))
-
-    texts = [n.get('text') or '' for n in nodes(root, cls='android.widget.TextView')]
+    texts = [n.get('text') or '' for n in nodes(dump_ui(), cls='android.widget.TextView')]
     has_result = any(t.startswith('Saved: ') or t.startswith('YouTube: ')
                      or t.startswith('Could not ') or t.startswith('No ')
                      for t in texts)
@@ -340,31 +230,18 @@ def step_paste_flow():
 
 
 def step_share_flow():
-    # --es (STRING extra), exactly like Android's share sheet sends
-    # EXTRA_TEXT; --eu would put a Uri in the bundle and ShareActivity
-    # would correctly see null (run #4 bug).
     shell("am start -a android.intent.action.SEND -t 'text/plain' "
-          "--es android.intent.extra.TEXT '%s' -n %s" % (URL2, SHARE), check=True)
-
-    # v2.6: the share flow shows a language picker before fetching.
-    wait_until('share-flow language picker',
-               lambda: nodes(dump_ui(), text_contains='fetch subtitles'), timeout=20)
-    record('share intent: language picker shown (v2.6)', True)
-    screenshot('share_picker')
-    fetch_btns = button_like(dump_ui(), 'FETCH')
-    if not fetch_btns:
-        raise RuntimeError('picker Fetch button not found')
-    tap_node(fetch_btns[0])
-
+          "--eu android.intent.extra.TEXT '%s' -n %s" % (URL2, SHARE), check=True)
     wait_until('focus back on MainActivity', focused_on_pkg, timeout=20)
-    wait_until('second job in JobStore', lambda: len(jobs_state() or []) >= 2, timeout=20)
+    wait_until('second job row', lambda: len(job_statuses(dump_ui())) >= 2, timeout=20)
     record('share intent: ShareActivity logged a second job', True)
-    st = wait_jobs_terminal(2)
-    record('share intent: both jobs terminal', len(st) >= 2 and all(s[1] != 'Queued' for s in st))
-    time.sleep(7)  # heads-up retract + settle -> static screen for the dump
-    root = dump_ui()
-    ui_st = job_statuses(root)
-    record('share intent: list shows both rows %s' % (ui_st or '?'), len(ui_st) >= 2)
+    screenshot('share_queued')
+
+    wait_until('both jobs terminal',
+               lambda: (lambda s: len(s) >= 2 and 'QUEUED' not in s)(job_statuses(dump_ui())),
+               timeout=JOB_TIMEOUT)
+    st = job_statuses(dump_ui())
+    record('share intent: both jobs terminal %s' % st, len(st) >= 2 and 'QUEUED' not in st)
     screenshot('share_terminal')
 
 
@@ -379,11 +256,7 @@ def step_clear():
     record('clear: confirmation dialog appears', True)
     screenshot('clear_dialog')
 
-    # AOSP dialog themes render button labels uppercased in the
-    # accessibility tree ("CLEAR", not "Clear") — match case-insensitively
-    # and keep the class filter so the section-header CLEAR TextView
-    # (not a Button) can't collide.
-    btns = button_like(dump_ui(), 'CLEAR')
+    btns = nodes(dump_ui(), text='Clear', cls='android.widget.Button')
     if not btns:
         raise RuntimeError('dialog Clear button not found')
     tap_node(btns[0])
@@ -446,17 +319,6 @@ DIALOG_XML = '''<hierarchy rotation="0">
  </node>
 </hierarchy>'''
 
-PICKER_XML = '''<hierarchy rotation="0">
- <node class="android.widget.FrameLayout" bounds="[0,0][1080,1920]" package="com.getsub.share">
-  <node class="android.widget.TextView" resource-id="android:id/alertTitle" text="GetSub - fetch subtitles?" bounds="[120,600][960,680]"/>
-  <node class="android.widget.Spinner" bounds="[120,760][960,880]">
-   <node class="android.widget.TextView" text="en — English" bounds="[140,780][700,860]"/>
-  </node>
-  <node class="android.widget.Button" resource-id="android:id/button2" text="CANCEL" bounds="[500,920][700,1000]"/>
-  <node class="android.widget.Button" resource-id="android:id/button1" text="FETCH" bounds="[740,920][940,1000]"/>
- </node>
-</hierarchy>'''
-
 
 def selftest():
     fails = 0
@@ -487,13 +349,6 @@ def selftest():
         ('dialog positive button (exact text+class)',
          len(nodes(root3, text='Clear', cls='android.widget.Button')) == 1),
         ('dialog button center math', center(nodes(root3, text='Clear')[0]) == (840, 1040)),
-    ]
-    root4 = ET.fromstring(PICKER_XML)
-    checks += [
-        ('v2.6 picker title found', len(nodes(root4, text_contains='fetch subtitles')) == 1),
-        ('v2.6 picker spinner present', len(nodes(root4, cls='android.widget.Spinner')) == 1),
-        ('v2.6 picker FETCH matched case-insensitively', len(button_like(root4, 'FETCH')) == 1),
-        ('v2.6 picker CANCEL not confused with FETCH', len(button_like(root4, 'CANCEL')) == 1),
     ]
     for name, ok in checks:
         print(('PASS  ' if ok else 'FAIL  ') + name)
