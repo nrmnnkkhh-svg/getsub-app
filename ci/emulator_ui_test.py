@@ -23,6 +23,7 @@ Runs the dump-parsing / node-finding / bounds-tap math against synthetic
 uiautomator XML matching what MainActivity actually renders, so the driver
 logic itself is verified even where no emulator exists.
 """
+import json
 import os
 import re
 import subprocess
@@ -104,13 +105,47 @@ def dump_ui(retries=6):
 
 
 def notif_state():
-    """All notification texts currently posted (cheap, UI-idle-independent).
+    """Raw notification_manager dump (records carry pkg + id, NOT the text).
 
-    Used as the oracle for service-lifecycle waits: uiautomator dump cannot
-    capture screens with continuous animation (indeterminate progress,
-    blinking cursor, heads-up notifications) -- it waits for an idle state
-    that never comes and then hangs (see capsule §30)."""
+    Used to assert WHICH notifications exist: id 1001 = ongoing foreground
+    notification, ids 2000+ = per-job result notifications (v2.5.3)."""
     return shell('dumpsys notification_manager')
+
+
+def notif_has_id(nid):
+    for line in notif_state().splitlines():
+        if ('id=%d' % nid) in line and PKG in line:
+            return True
+    return False
+
+
+def jobs_state():
+    """JobStore contents read straight from the app's private dir.
+
+    AOSP emulator images allow `adb root`, so the tests can observe the real
+    state machine (Queued -> Done/Error) with zero UI dependence. Returns a
+    newest-first list of (id, status, result), or None if unreadable."""
+    try:
+        out = shell('cat /data/data/%s/files/jobs.json 2>/dev/null || echo []' % PKG)
+        arr = json.loads(out.strip() or '[]')
+        return [(j.get('id'), j.get('status'), j.get('result', ''))
+                for j in reversed(arr)]
+    except Exception:
+        return None
+
+
+def wait_jobs_terminal(min_count, timeout=JOB_TIMEOUT):
+    """Wait until >= min_count jobs exist and none is Queued anymore."""
+    def pred():
+        st = jobs_state()
+        if st is None:  # oracle fallback: result notifications appeared
+            n = notif_state()
+            done = sum(1 for i in range(2000, 2100)
+                       if any(('id=%d' % i) in l and PKG in l for l in n.splitlines()))
+            return done >= min_count
+        return len(st) >= min_count and all(s[1] != 'Queued' for s in st)
+    wait_until('%d job(s) terminal' % min_count, pred, timeout=timeout)
+    return jobs_state() or []
 
 
 BOUNDS = re.compile(r'\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]')
@@ -187,9 +222,14 @@ def step_boot_install():
     wait_until('device boot', lambda: shell('getprop sys.boot_completed').strip() == '1',
                timeout=180)
     log('boot complete; Android ' + shell('getprop ro.build.version.release').strip())
+    adb('root', check=False)          # AOSP images allow it; enables jobs.json oracle
+    adb('wait-for-device', check=False)
+    time.sleep(2)
     adb('install', '-r', '-t', APK, check=True)
     shell('pm grant %s android.permission.POST_NOTIFICATIONS' % PKG)  # API33+; harmless no-op otherwise
     record('APK installs on fresh emulator', True)
+    record('jobs.json oracle available', jobs_state() is not None,
+           'adb root state machine access' if jobs_state() is not None else 'falling back to notifications')
 
 
 def step_launch():
@@ -233,22 +273,31 @@ def step_paste_flow():
         raise RuntimeError('Get button not found after typing')
     tap_node(gets[0])
 
-    # Service lifecycle oracle = notifications (immune to UI animation).
-    # NEVER dump while the fetch is running: spinner/toast/heads-up keep the
-    # screen from ever reaching uiautomator's idle state.
-    wait_until('ongoing "Fetching subtitles" notification',
-               lambda: 'Fetching subtitles' in notif_state(), timeout=25)
-    record('paste flow: foreground service running (ongoing notification)', True)
+    # State machine oracle = jobs.json via root shell (UI is never polled
+    # while animations run: spinner/toast/heads-up keep uiautomator's idle
+    # state from ever arriving, see capsule §30).
+    wait_until('job row in JobStore', lambda: len(jobs_state() or []) >= 1, timeout=20)
+    # While the job is Queued, the foreground notification (id 1001) must exist.
+    ongoing_seen = False
+    for _ in range(8):
+        if notif_has_id(1001):
+            ongoing_seen = True
+            break
+        time.sleep(1)
+    record('paste flow: foreground notification while fetching', ongoing_seen)
     screenshot('job_queued')
 
-    wait_until('result notification (Done/Error)',
-               lambda: ('Done:' in notif_state()) or ('Error:' in notif_state()),
-               timeout=JOB_TIMEOUT)
-    time.sleep(7)  # let the heads-up retract + list poller settle -> static screen
-    st = job_statuses(dump_ui())
-    record('paste flow: job reached terminal status %s' % st, st and st[0] in ('DONE', 'ERROR'))
+    st = wait_jobs_terminal(1)
+    record('paste flow: job reached terminal status %s' % (st[0][1] if st else '?',),
+           st and st[0][1] in ('Done', 'Error'))
 
-    texts = [n.get('text') or '' for n in nodes(dump_ui(), cls='android.widget.TextView')]
+    time.sleep(7)  # let the heads-up retract + list poller settle -> static screen
+    record('paste flow: result notification posted (id 2000+)', notif_has_id(2000 + int(st[0][0])) if st else False)
+    root = dump_ui()
+    ui_st = job_statuses(root)
+    record('paste flow: list row shows %s' % (ui_st or '?'), ui_st and ui_st[0] in ('DONE', 'ERROR'))
+
+    texts = [n.get('text') or '' for n in nodes(root, cls='android.widget.TextView')]
     has_result = any(t.startswith('Saved: ') or t.startswith('YouTube: ')
                      or t.startswith('Could not ') or t.startswith('No ')
                      for t in texts)
@@ -260,16 +309,14 @@ def step_share_flow():
     shell("am start -a android.intent.action.SEND -t 'text/plain' "
           "--eu android.intent.extra.TEXT '%s' -n %s" % (URL2, SHARE), check=True)
     wait_until('focus back on MainActivity', focused_on_pkg, timeout=20)
-    # Second job => second result notification (per-job ids since v2.5.3).
-    def two_results():
-        n = notif_state()
-        return (n.count('Done:') + n.count('Error:')) >= 2
-    wait_until('second result notification', two_results, timeout=JOB_TIMEOUT)
+    wait_until('second job in JobStore', lambda: len(jobs_state() or []) >= 2, timeout=20)
+    record('share intent: ShareActivity logged a second job', True)
+    st = wait_jobs_terminal(2)
+    record('share intent: both jobs terminal', len(st) >= 2 and all(s[1] != 'Queued' for s in st))
     time.sleep(7)  # heads-up retract + settle -> static screen for the dump
     root = dump_ui()
-    st = job_statuses(root)
-    record('share intent: second job logged and terminal %s' % st,
-           len(st) >= 2 and 'QUEUED' not in st)
+    ui_st = job_statuses(root)
+    record('share intent: list shows both rows %s' % (ui_st or '?'), len(ui_st) >= 2)
     screenshot('share_terminal')
 
 
